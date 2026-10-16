@@ -112,7 +112,7 @@ if (redis) {
   await sub.subscribe(WA_REQ);
   sub.on("message", (_channel, raw) => {
     void (async () => {
-      let job: { requestId?: string; op?: string; sessionId?: number; groupJids?: string[]; groupJid?: string } = {};
+      let job: { requestId?: string; op?: string; sessionId?: number; companyId?: number; groupJids?: string[]; groupJid?: string } = {};
       try {
         job = JSON.parse(raw);
       } catch {
@@ -125,6 +125,13 @@ if (redis) {
         await redis.expire(key, 30);
       };
       try {
+        // "Buscar agora" do painel: a rodada precisa acontecer aqui, onde as sessões do WhatsApp estão vivas.
+        if (job.op === "run-deals") {
+          const companyId = Number(job.companyId);
+          if (!companyId) return reply({ ok: false, error: "Empresa inválida" });
+          void runDueDeals(companyId).catch(err => console.error("[worker] buscar agora", err));
+          return reply({ ok: true, queued: true });
+        }
         const live = getLive(Number(job.sessionId));
         if (!live?.client.group) return reply({ ok: false, error: "O WhatsApp desta conexão ainda não está pronto." });
         if (job.op === "groups") {
@@ -215,7 +222,7 @@ const tick = async () => {
     await suspendExpired();
     await remindDue();
     const sent = await runDueDeals();
-    const moved = (await withLock("audience", 600, tickAudience)) ?? 0;
+    const moved = (await withLock("audience", 90, tickAudience)) ?? 0;
     if (sent || moved) console.log(`[worker] ofertas=${sent} contatos=${moved}`);
   } catch (err) {
     console.error("[worker]", err);

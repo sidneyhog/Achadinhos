@@ -10,6 +10,7 @@ export type WaReply =
   | { ok: true; groups: WaGroup[] }
   | { ok: true; rows: WaContact[] }
   | { ok: true; subject: string; admin: boolean }
+  | { ok: true; queued: true }
   | { ok: false; error: string };
 
 export const askWorker = async (body: Record<string, unknown>, timeoutSec = 25): Promise<WaReply> => {

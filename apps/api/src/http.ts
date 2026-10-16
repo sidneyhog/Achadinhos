@@ -11,7 +11,6 @@ import { createBoleto, createCard, createPix, efiConfigured, testEfiConnection }
 import { loadEfiRuntime, loadPlatform } from "./platform";
 import { stopSession } from "./zapo/session";
 import { askWorker } from "./zapo/bridge";
-import { runDueDeals } from "./engine/runDeals";
 import { AUDIENCE_LIMITS, saveContacts, tickAudience } from "./engine/audience";
 import { createOfficialMlLink, mercadoLivreCookieExpiry, reportMlLink, stripMlTracking } from "./deals/mlAffiliate";
 import { marketplaceLabel } from "./deals/types";
@@ -972,8 +971,11 @@ app.post("/api/deals/run", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
     await planOf(companyId);
-    const sent = await runDueDeals(companyId);
-    res.json({ sent });
+    // As sessões do WhatsApp vivem só no worker. Rodar aqui na API não publicava no WhatsApp e ainda gravava
+    // "Ative um grupo na conexão..." como erro. Agora o pedido vai para o worker, que roda a rodada com a mesma trava.
+    const reply = await askWorker({ op: "run-deals", companyId }, 10);
+    if (!reply.ok) return res.status(502).json({ error: reply.error });
+    res.json({ sent: 0, queued: true });
   } catch (err) {
     next(err);
   }

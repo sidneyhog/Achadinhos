@@ -217,7 +217,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
   let sent = 0;
   for (const company of companies) {
    const before = sent;
-   const ran = await withLock(`deals:${company.id}`, 600, async () => {
+   const ran = await withLock(`deals:${company.id}`, 90, async () => {
+   await (async () => {
    try {
     if (!subscriptionOpen({ ...company, status: company.sub_status })) {
       if (company.sub_status === "trialing" && company.trial_ends_at && new Date(company.trial_ends_at) <= new Date()) {
@@ -506,6 +507,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
    } catch (err) {
      console.error(`[deals] company=${company.id}`, err);
    }
+   })();
+   return true; // distingue "rodou" de "pulou porque outra rodada segura a trava" (undefined)
    });
    if (ran === undefined) console.log(`[deals] company=${company.id} já está em outra rodada; pulando`);
   }

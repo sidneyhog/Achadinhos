@@ -1097,7 +1097,7 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
           </div>
           <div className="aff-top__actions">
             {onReturn ? <button type="button" onClick={onReturn}>Voltar ao super admin</button> : null}
-            <button type="button" disabled={!enabled} onClick={async () => { try { const result = await api<{ sent: number }>("/api/deals/run", { method: "POST" }); tell("Busca", `${result.sent} envio(s).`); await reload(); } catch (err) { tell("Não buscou", err instanceof Error ? err.message : "A busca não concluiu", "bad"); } }}>Buscar agora</button>
+            <button type="button" disabled={!enabled} onClick={async () => { try { const result = await api<{ sent: number; queued?: boolean }>("/api/deals/run", { method: "POST" }); tell("Busca", result.queued ? "Rodada pedida ao robô. As publicações aparecem em instantes." : `${result.sent} envio(s).`); await reload(); } catch (err) { tell("Não buscou", err instanceof Error ? err.message : "A busca não concluiu", "bad"); } }}>Buscar agora</button>
             <button type="button" className={enabled ? "" : "is-solid"} onClick={() => saveSetting({ enabled: !enabled }, enabled ? "O robô foi pausado." : "O robô foi ativado.")}>{enabled ? "Pausar" : "Ativar"}</button>
             <button type="button" aria-label="Configurações" onClick={() => setView("config")}><Icon name="config" /></button>
           </div>
