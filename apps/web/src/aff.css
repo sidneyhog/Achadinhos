@@ -1670,3 +1670,31 @@ button.land-brand { background: none; border: 0; padding: 0; cursor: pointer; fo
   .land-glow, .land-reveal, .land-btn, .land-steps article, .land-cards article, .land-stores article, .land-plans article { animation: none; transition: none; }
   .land-reveal { opacity: 1; transform: none; }
 }
+
+/* Caixa "Como conectar" no topo da janela de cada loja. */
+.aff-howto { border: 1px solid #c7d2fe; background: #f5f7ff; border-radius: 14px; padding: 12px 14px; display: grid; gap: 8px; }
+.aff-howto summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; cursor: pointer; list-style: none; }
+.aff-howto summary::-webkit-details-marker { display: none; }
+.aff-howto summary strong { font-size: 14px; color: #1e1b4b; }
+.aff-howto summary::after { content: "▾"; margin-left: auto; color: #6366f1; transition: transform .15s; }
+.aff-howto:not([open]) summary::after { transform: rotate(-90deg); }
+.aff-howto__tag { font-size: 12px; font-weight: 650; border-radius: 999px; padding: 2px 8px; background: #fffbeb; color: #b45309; }
+.aff-howto__tag.is-auto { background: #ecfdf5; color: #047857; }
+.aff-howto__time { font-size: 12px; color: var(--muted); }
+.aff-howto ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; line-height: 1.45; color: #334155; }
+.aff-howto a { justify-self: start; font-size: 13px; font-weight: 650; color: #4f46e5; text-decoration: none; }
+.aff-howto a:hover { text-decoration: underline; }
+.aff-ext__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 650;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}

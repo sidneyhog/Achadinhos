@@ -195,7 +195,171 @@ const GUIDES = [
   ["epoca", "EP", "Época Cosméticos", "Implementado", "Configurar a Época", "5 min · Lojas · Iniciante", "A Época está na Lomadee. Basta a chave da API do painel da Lomadee."]
 ];
 
-/** Passo a passo de cada guia, em linguagem de cliente. Aparece ao clicar em Abrir guia. */
+/**
+ * Como conectar cada loja, em linguagem de cliente. Aparece no topo da janela Configurar de cada loja
+ * e no Material de apoio. auto = o robô busca e publica ofertas sozinho; false = só identifica a conta.
+ */
+const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string, string]; steps: string[] }> = {
+  ml: {
+    auto: true,
+    time: "10 min",
+    portal: ["Abrir o gerador de links do ML", "https://www.mercadolivre.com.br/afiliados/linkbuilder"],
+    steps: [
+      "No gerador de links do Mercado Livre, gere um link de afiliado de qualquer produto e copie.",
+      "Cole em Colar um link para preencher, aqui embaixo. Conta e Matt Tool se preenchem sozinhos.",
+      "Baixe a extensão na página Automação e instale no Chrome ou no Edge.",
+      "Logado no Mercado Livre, clique na extensão e em Copiar cookie. Cole em Cookie do gerador.",
+      "Deixe Gerar link oficial marcado e clique em Testar link oficial. Deu certo se aparecer um link meli.la.",
+      "O cookie vale cerca de 30 dias. O painel avisa 2 dias antes: é só copiar e colar de novo."
+    ]
+  },
+  shopee: {
+    auto: true,
+    time: "15 min",
+    portal: ["Abrir o portal de afiliados da Shopee", "https://affiliate.shopee.com.br"],
+    steps: [
+      "No portal de afiliados da Shopee, abra a área Open API e peça o acesso. A liberação pode levar alguns dias.",
+      "Com o acesso liberado, copie o App ID e o Secret que a Shopee mostra.",
+      "Cole os dois aqui, marque Publicar esta loja e salve."
+    ]
+  },
+  aliexpress: {
+    auto: true,
+    time: "15 min",
+    portal: ["Abrir o AliExpress Portals", "https://portals.aliexpress.com"],
+    steps: [
+      "No AliExpress Portals (programa de afiliados), crie um app de API. Ele mostra App Key e App Secret.",
+      "No mesmo portal, copie o seu Tracking ID.",
+      "Cole os três aqui, marque Publicar esta loja e salve."
+    ]
+  },
+  amazon: {
+    auto: true,
+    time: "5 min",
+    portal: ["Abrir o Amazon Associados", "https://associados.amazon.com.br"],
+    steps: [
+      "No Amazon Associados, copie a sua Partner Tag (termina em -20). Também pode colar um link seu com tag=.",
+      "Em Links dos produtos, cole um produto por linha: link | nome | preço. O robô põe a sua tag e publica um por vez.",
+      "Access Key e Secret são opcionais: a Amazon só libera a API depois de 10 vendas em 30 dias."
+    ]
+  },
+  awin: {
+    auto: true,
+    time: "10 min",
+    portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
+    steps: [
+      "No painel da Awin, copie o seu Id do publisher (aparece no topo, ao lado do nome da conta).",
+      "Em Ferramentas → API Credentials, gere o token da API e copie.",
+      "Cole os dois aqui e salve. Clube Samsung, Casas Bahia, Natura e Pague Menos usam esta mesma conta."
+    ]
+  },
+  samsung: {
+    auto: true,
+    time: "2 min",
+    portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
+    steps: [
+      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
+      "Na Awin, inscreva-se no programa Clube Samsung e espere a aprovação.",
+      "Aprovado, salve aqui. Não precisa colar nada."
+    ]
+  },
+  casasbahia: {
+    auto: true,
+    time: "2 min",
+    portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
+    steps: [
+      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
+      "Na Awin, inscreva-se no programa Casas Bahia e espere a aprovação.",
+      "Aprovado, salve aqui. Não precisa colar nada."
+    ]
+  },
+  natura: {
+    auto: true,
+    time: "2 min",
+    portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
+    steps: [
+      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
+      "Na Awin, inscreva-se no programa Natura e espere a aprovação.",
+      "Aprovado, salve aqui. Não precisa colar nada."
+    ]
+  },
+  paguemenos: {
+    auto: true,
+    time: "2 min",
+    portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
+    steps: [
+      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
+      "Na Awin, inscreva-se no programa Pague Menos e espere a aprovação.",
+      "Aprovado, salve aqui. Não precisa colar nada."
+    ]
+  },
+  rakuten: {
+    auto: true,
+    time: "12 min",
+    portal: ["Abrir o painel da Rakuten", "https://cli.linksynergy.com"],
+    steps: [
+      "No painel da Rakuten Advertising, abra a área de desenvolvedor (Web Services) e copie Client ID e Client Secret.",
+      "Copie também o SID: é o número do seu site, que aparece no menu da conta.",
+      "Cole os três aqui, marque Publicar esta loja e salve."
+    ]
+  },
+  epoca: {
+    auto: true,
+    time: "5 min",
+    portal: ["Abrir a Lomadee", "https://www.lomadee.com"],
+    steps: [
+      "A Época Cosméticos fica na Lomadee. No painel da Lomadee, copie a sua chave da API (x-api-key).",
+      "Cole aqui e salve. O robô busca o catálogo e publica com o seu link."
+    ]
+  },
+  shein: {
+    auto: false,
+    time: "5 min",
+    steps: [
+      "Gere um link de afiliado da Shein (começa com onelink.shein.com) e cole aqui.",
+      "Salve. O card passa de Pendente para Conectada quando a conta é reconhecida.",
+      "A Shein não entrega lista de produtos, então o robô não publica Shein sozinho."
+    ]
+  },
+  magalu: {
+    auto: false,
+    time: "5 min",
+    portal: ["Abrir o Parceiro Magalu", "https://www.magazinevoce.com.br"],
+    steps: [
+      "Copie o nome da sua loja (o final do endereço da sua loja Magalu) e o seu Promoter Id.",
+      "Cole os dois aqui e salve.",
+      "A Magalu não entrega lista de produtos, então o robô não publica Magalu sozinho."
+    ]
+  },
+  terabyte: {
+    auto: false,
+    time: "3 min",
+    steps: [
+      "Copie o seu ID de afiliado da Terabyte e cole aqui.",
+      "Salve. Ele entra nos links de produto da Terabyte.",
+      "A Terabyte não entrega lista de produtos, então o robô não publica Terabyte sozinho."
+    ]
+  }
+};
+
+/** Caixa "Como conectar" no topo da janela de cada loja. */
+function StoreHowTo({ id }: { id: string }) {
+  const help = STORE_HELP[id];
+  if (!help) return null;
+  return (
+    <details className="aff-howto" open>
+      <summary>
+        <strong>Como conectar</strong>
+        <span className={`aff-howto__tag${help.auto ? " is-auto" : ""}`}>{help.auto ? "Publica sozinho" : "Só identifica a conta"}</span>
+        <span className="aff-howto__time">{help.time}</span>
+      </summary>
+      <ol>{help.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+      {help.portal ? <a href={help.portal[1]} target="_blank" rel="noopener noreferrer">{help.portal[0]} ↗</a> : null}
+    </details>
+  );
+}
+
+/** Passo a passo de cada guia do Material de apoio. As lojas usam o mesmo texto da janela Configurar. */
 const GUIDE_STEPS: Record<string, string[]> = {
   whatsapp: [
     "Vá em Conexões e clique em Nova conexão. Escolha WhatsApp e dê um nome (ex.: AchadosSp).",
@@ -210,47 +374,14 @@ const GUIDE_STEPS: Record<string, string[]> = {
     "No painel, Conexões → Nova conexão → Telegram. Cole o token do BotFather e crie.",
     "Escolha os chats e as lojas que esse bot publica."
   ],
-  ml: [
-    "Gere um link de afiliado seu no Mercado Livre e cole em Lojas → Mercado Livre → Colar um link para preencher. Conta e Matt Tool se preenchem sozinhos.",
-    "Baixe a extensão em Automação e instale no Chrome ou no Edge (passo a passo na própria página).",
-    "Logado no Mercado Livre, clique na extensão e em Copiar cookie.",
-    "Cole em Cookie do gerador, deixe Gerar link oficial marcado e salve. O teste deve devolver um link meli.la.",
-    "O cookie vale cerca de 30 dias. O painel avisa 2 dias antes; aí é só copiar e colar de novo."
-  ],
-  shopee: [
-    "No portal de afiliados da Shopee, peça acesso à API (Open API). A Shopee libera um App ID e um Secret.",
-    "Em Lojas → Shopee, cole o App ID e o Secret.",
-    "Marque Publicar esta loja e salve. Não use cookie: a Shopee recusa e nada é publicado."
-  ],
-  ali: [
-    "No AliExpress Portals (programa de afiliados), crie um app de API. Ele mostra App Key e App Secret.",
-    "No mesmo portal, copie o seu Tracking ID.",
-    "Em Lojas → AliExpress, cole App Key, Secret e Tracking ID, marque Publicar esta loja e salve."
-  ],
-  awin: [
-    "No painel da Awin, copie o seu Id do publisher e gere um token em API Credentials.",
-    "Em Lojas → Awin, cole o Id do publisher e o Token da API e salve.",
-    "Clube Samsung, Casas Bahia, Natura e Pague Menos usam essa mesma conta. Só aparecem ofertas dos programas em que você já foi aprovado."
-  ],
-  rakuten: [
-    "No painel da Rakuten Advertising, abra a área de desenvolvedor e copie Client ID e Client Secret.",
-    "Copie também o SID (o número do seu site na Rakuten).",
-    "Em Lojas → Rakuten, cole os três, marque Publicar esta loja e salve."
-  ],
-  shein: [
-    "Gere um link de afiliado da Shein (onelink.shein.com) e cole em Lojas → Shein.",
-    "Quando o card mudar para Conectada, a conta foi reconhecida.",
-    "A Shein não entrega lista de produtos: o robô não publica Shein sozinho."
-  ],
-  amazon: [
-    "Copie a sua Partner Tag do Amazon Associados (termina em -20) e cole em Lojas → Amazon. Pode colar um link com tag= que ela é extraída.",
-    "Cole os links dos produtos, um por linha (link | nome | preço). O robô coloca a sua tag e publica no ritmo da aba Envio.",
-    "Access Key e Secret são opcionais: a Amazon só libera a API depois de 10 vendas em 30 dias."
-  ],
-  epoca: [
-    "No painel da Lomadee, copie a sua chave da API (x-api-key).",
-    "Em Lojas → Época, cole a chave e salve. O robô busca o catálogo e publica com o seu link."
-  ]
+  ml: STORE_HELP.ml.steps,
+  shopee: STORE_HELP.shopee.steps,
+  ali: STORE_HELP.aliexpress.steps,
+  awin: STORE_HELP.awin.steps,
+  rakuten: STORE_HELP.rakuten.steps,
+  shein: STORE_HELP.shein.steps,
+  amazon: STORE_HELP.amazon.steps,
+  epoca: STORE_HELP.epoca.steps
 };
 
 const EXTRA_FORMS: Record<string, { hint: string; fields: Array<{ key: string; label: string; placeholder: string; secret?: boolean; locked?: boolean }> }> = {
@@ -413,19 +544,14 @@ function StoreDialog({ store, setting, onClose, onSaved, onNotice }: { store: an
         {store.id === "ml" ? (
           <>
             <h2>Mercado Livre</h2>
+            <StoreHowTo id="ml" />
             <label>Conta<input name="ml-conta" value={ml.word} autoComplete="off" placeholder="matt_word da sua conta" readOnly={mlField !== "conta"} onFocus={() => setMlField("conta")} onChange={(event) => setMl({ ...ml, word: event.target.value.trim() })} /></label>
             <label>Matt Tool<input name="ml-matt-tool" value={ml.tool} inputMode="numeric" autoComplete="off" placeholder="número do matt_tool" readOnly={mlField !== "tool"} onFocus={() => setMlField("tool")} onChange={(event) => setMl({ ...ml, tool: event.target.value.replace(/\D/g, "") })} /></label>
             <label>Etiqueta<input name="ml-etiqueta" value={ml.tag} autoComplete="off" placeholder={ml.word || "A mesma da Conta"} readOnly={mlField !== "tag"} onFocus={() => setMlField("tag")} onChange={(event) => setMl({ ...ml, tag: event.target.value.trim() })} /></label>
-            <p>É a Etiqueta em uso do gerador. Na sua tela ela já é a Conta. Deixe vazio que o robô usa essa. O campo de URL de lá é manual. Aqui o robô manda o produto sozinho.</p>
+            <p>Pode deixar a Etiqueta vazia: o robô usa a Conta.</p>
             <label className="is-check"><input type="checkbox" checked={ml.official} onChange={(event) => setMl({ ...ml, official: event.target.checked })} /> Gerar link oficial (meli.la)</label>
-            <section className="aff-ext"><div><strong>Extensão para copiar o cookie</strong><p>O download e o passo a passo ficam na página Automação.</p></div></section>
+            <section className="aff-ext"><div><strong>Extensão para copiar o cookie</strong><p>Instale uma vez no Chrome ou no Edge. O passo a passo está na página Automação.</p></div><a className="is-solid aff-ext__btn" href="/achadinhos-cookie.zip" download>Baixar extensão</a></section>
             <label>Cookie do gerador<SecretInput name="ml-cookie-gerador" value={ml.cookie} placeholder="Cookie da requisição createLink" readOnly={mlField !== "cookie"} onFocus={() => setMlField("cookie")} onReveal={() => setMlField("cookie")} onChange={(value) => setMl({ ...ml, cookie: value })} />{cookieUntil ? <small className="aff-cookie-until">Válido até {new Date(cookieUntil).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}. O aviso aparece 2 dias antes.</small> : null}</label>
-            <ol className="aff-steps">
-              <li>Copie um link seu de afiliado. A Conta é o matt_word. O Matt Tool é o número.</li>
-              <li>A Etiqueta em uso do gerador já é a Conta. Deixe o campo vazio. Não cole produto lá: o robô envia sozinho.</li>
-              <li>Logado no gerador, use a extensão e clique em Copiar cookie. Sem a extensão, copie o Cookie da requisição createLink. Não é a senha da conta.</li>
-              <li>Marque Gerar link oficial, salve e teste. O resultado certo é um meli.la.</li>
-            </ol>
             <label>Colar um link para preencher<textarea value={ml.paste} autoComplete="off" placeholder="https://...matt_word=...&matt_tool=..." onChange={(event) => {
               const value = event.target.value;
               setMl((current) => ({ ...current, paste: value }));
@@ -460,7 +586,7 @@ function StoreDialog({ store, setting, onClose, onSaved, onNotice }: { store: an
         {store.id === "amazon" ? (
           <>
             <h2>Amazon</h2>
-            <p>A tag conecta a conta. Sem a API, cole abaixo os links dos produtos que você abriu na Amazon, um por linha. A tag entra sozinha e o robô envia no intervalo da aba Envio. Access Key e Secret continuam opcionais, para quando a Amazon liberar a lista.</p>
+            <StoreHowTo id="amazon" />
             {config.partnerTag ? <div className="aff-valid"><strong>Conta reconhecida</strong><span>Tag {config.partnerTag}</span></div> : null}
             <label>Partner Tag<input value={config.partnerTag || ""} autoComplete="off" placeholder="sua-tag-20 ou um link com tag=" onChange={(event) => {
               const raw = event.target.value.trim();
@@ -475,16 +601,16 @@ function StoreDialog({ store, setting, onClose, onSaved, onNotice }: { store: an
         {store.id === "shopee" ? (
           <>
             <h2>Shopee</h2>
-            <p>A publicação usa a API oficial. Peça a ativação em Afiliados, copie App ID e Secret e salve. O cookie da aba Rede volta 403 neste servidor e não manda oferta.</p>
+            <StoreHowTo id="shopee" />
             <label>App ID<input value={config.appId || ""} autoComplete="off" placeholder="App ID da API de afiliados" onChange={(event) => setConfig({ ...config, appId: event.target.value })} /></label>
             <label>Secret<SecretInput value={secrets.secret || ""} placeholder="Secret da API" onChange={(value) => setSecrets({ ...secrets, secret: value })} /></label>
-            <p>O cookie que já foi colado fica no servidor e não entra na rodada. A Shopee recusa essa chamada com 403.</p>
+            <p>Não use cookie na Shopee: ela recusa e nada é publicado. Só App ID e Secret funcionam.</p>
           </>
         ) : null}
         {store.id === "aliexpress" ? (
           <>
             <h2>AliExpress</h2>
-            <p>App Key, Secret e Tracking ID. Sem eles a busca de produtos entra no lugar. A senha da conta não fica salva.</p>
+            <StoreHowTo id="aliexpress" />
             <label>App Key<input value={config.appKey || ""} autoComplete="off" onChange={(event) => setConfig({ ...config, appKey: event.target.value })} /></label>
             <label>Secret<SecretInput value={secrets.appSecret || ""} placeholder="App Secret" onChange={(value) => setSecrets({ ...secrets, appSecret: value })} /></label>
             <label>Tracking ID<input value={config.trackingId || ""} autoComplete="off" onChange={(event) => setConfig({ ...config, trackingId: event.target.value })} /></label>
@@ -494,7 +620,7 @@ function StoreDialog({ store, setting, onClose, onSaved, onNotice }: { store: an
         {extra ? (
           <>
             <h2>{store.label}</h2>
-            <p>{extra.hint}</p>
+            <StoreHowTo id={store.id} />
             {extra.fields.map((field) => (
               <label key={field.key}>
                 {field.label}
@@ -1250,9 +1376,9 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
 
           {view === "stores" && (
             <section className="aff-block">
-              <header><div><h2>Lojas</h2><p>Configure as contas de afiliado. A comissão continua no painel de cada loja.</p></div></header>
+              <header><div><h2>Lojas</h2><p>Clique em Configurar na loja que você quer usar. A janela mostra o passo a passo e o link do painel de afiliado da loja. A comissão continua no painel de cada loja.</p></div></header>
               <section className="aff-ext">
-                <div><strong>Extensão para copiar o cookie</strong><p>O download e o passo a passo ficam na página Automação.</p></div>
+                <div><strong>Mercado Livre: extensão para copiar o cookie</strong><p>Só o Mercado Livre usa cookie. As outras lojas usam as chaves do painel de afiliado de cada uma: clique em Configurar para ver o passo a passo.</p></div>
                 <button type="button" className="is-solid" onClick={() => setView("auto")}>Abrir o guia</button>
               </section>
               <input className="aff-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar loja" />
