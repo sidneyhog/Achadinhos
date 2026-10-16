@@ -2093,9 +2093,9 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
 
           {view === "auto" && (
             <section className="aff-block aff-guidepage">
-              <header className="aff-guidepage__head"><div><h2>Automação</h2><p>Baixe a extensão, instale no Chrome ou no Edge e copie o cookie da loja.</p></div></header>
+              <header className="aff-guidepage__head"><div><h2>Automação</h2><p>Baixe a extensão, instale no Chrome ou no Edge e copie o cookie da loja.</p></div><a className="is-solid" href="/achadinhos-cookie.zip" download>Baixar extensão</a></header>
               <div className="aff-guidepage__grid">
-                {[["Baixar", "Descompacte a pasta achadinhos-cookie."], ["Chrome ou Edge", "Ligue o modo do desenvolvedor e carregue a pasta."], ["Copiar cookie", "No gerador logado, clique em Copiar cookie."], ["Salvar", "Cole o cookie na loja Mercado Livre e salve."]].map(([title, text], index) => (
+                {[["Baixar", "Clique em Baixar extensão e descompacte o arquivo. Sai a pasta achadinhos-cookie."], ["Chrome ou Edge", "Abra chrome://extensions (ou edge://extensions), ligue o Modo do desenvolvedor, clique em Carregar sem compactação e escolha a pasta."], ["Copiar cookie", "Entre na sua conta do Mercado Livre, clique no ícone da extensão e em Copiar cookie."], ["Salvar", "Em Lojas → Mercado Livre, cole no campo Cookie do gerador e salve. Vale por cerca de 30 dias."]].map(([title, text], index) => (
                   <article key={title}><b>{index + 1}</b><div><strong>{title}</strong><span>{text}</span></div></article>
                 ))}
               </div>

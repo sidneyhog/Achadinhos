@@ -4,6 +4,9 @@ COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY apps/web .
 RUN npm run build
+# Extensão do cookie: baixada pela página Automação do painel.
+COPY extensions/achadinhos-cookie /ext/achadinhos-cookie
+RUN cd /ext && python3 -m zipfile -c /web/dist/achadinhos-cookie.zip achadinhos-cookie/
 
 FROM nginx:1.27-alpine
 # A imagem oficial do Nginx troca ${API_UPSTREAM} no template ao iniciar (só variáveis definidas no ambiente).
