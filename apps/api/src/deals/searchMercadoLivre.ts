@@ -112,6 +112,15 @@ const cardToOffer = (card: any): DealOffer | null => {
 
 let catalogCache: { at: number; offers: DealOffer[] } | null = null;
 
+/** O que o ML respondeu na última tentativa; vai para a mensagem de erro do painel quando não vem nenhuma oferta. */
+const lastFetch = { api: "", page: "" };
+
+const pageSummary = (status: number, html: string, items: number): string => {
+  const title = (html.match(/<title[^>]*>([^<]{0,80})/i)?.[1] || "").trim();
+  const marker = html.includes("__NORDIC_RENDERING_CTX__") ? "com dados" : "sem dados de ofertas";
+  return `HTTP ${status}, ${marker}, ${items} itens${title ? `, título "${title}"` : ""}`;
+};
+
 const loadOfferCatalog = async (): Promise<DealOffer[]> => {
   if (catalogCache && Date.now() - catalogCache.at < 3 * 60 * 1000) {
     return catalogCache.offers;
@@ -128,9 +137,17 @@ const loadOfferCatalog = async (): Promise<DealOffer[]> => {
           "Accept-Language": "pt-BR,pt;q=0.9"
         }
       });
-      const parsed = extractObject(String(response.data), "__NORDIC_RENDERING_CTX__");
+      const html = String(response.data);
+      let parsed: any = null;
+      try {
+        parsed = extractObject(html, "__NORDIC_RENDERING_CTX__");
+      } catch {
+        parsed = null;
+      }
       const items = parsed?.appProps?.pageProps?.data?.items;
-      return Array.isArray(items) ? items : [];
+      const list = Array.isArray(items) ? items : [];
+      if (page === 1) lastFetch.page = pageSummary(response.status, html, list.length);
+      return list;
     })
   );
   const offers = pages
@@ -205,10 +222,17 @@ export const searchMercadoLivre = async (
   let offers: DealOffer[] = [];
   try {
     offers = await fromApi(query);
+    lastFetch.api = `${offers.length} resultados`;
   } catch (err) {
+    const status = (err as { response?: { status?: number } }).response?.status;
+    lastFetch.api = status ? `HTTP ${status}` : String((err as Error).message || err).slice(0, 60);
     offers = [];
   }
   if (!offers.length) offers = await loadOfferCatalog();
+  if (!offers.length) {
+    // Sem isto o painel mostrava "Nenhuma oferta passou nos filtros", e o problema real (ML sem resposta útil) ficava escondido.
+    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). Pode ser bloqueio do ML ao IP da VPS.`);
+  }
   const wanted = offers.filter(offer => matchesQuery(offer, query));
   const pool = (wanted.length ? wanted : offers).sort(
     (a, b) =>
