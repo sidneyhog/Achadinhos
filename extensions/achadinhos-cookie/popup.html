@@ -2,17 +2,21 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <title>Copiar cookie</title>
+  <title>Cookie do Mercado Livre</title>
   <style>
     body { width: 280px; margin: 0; padding: 16px; font: 14px/1.4 system-ui, sans-serif; color: #0f172a; }
     h1 { margin: 0 0 4px; font-size: 16px; }
     p { margin: 0 0 12px; color: #64748b; font-size: 13px; }
     button { width: 100%; height: 40px; border: 0; border-radius: 10px; background: #6d28d9; color: #fff; font-weight: 650; cursor: pointer; }
     button:disabled { opacity: .6; cursor: default; }
+    button.leve { background: #f1f5f9; color: #0f172a; }
+    [hidden] { display: none; }
     a { display: block; margin-top: 10px; color: #6d28d9; font-size: 13px; }
-    #status { margin-top: 12px; font-size: 13px; }
-    #status.ok { color: #15803d; }
-    #status.erro { color: #b91c1c; }
+    input { box-sizing: border-box; width: 100%; height: 36px; margin-bottom: 8px; padding: 0 10px; border: 1px solid #cbd5e1; border-radius: 10px; font: inherit; }
+    hr { margin: 16px 0; border: 0; border-top: 1px solid #e2e8f0; }
+    #status, #auto { margin-top: 12px; font-size: 13px; }
+    .ok { color: #15803d; }
+    .erro { color: #b91c1c; }
   </style>
 </head>
 <body>
@@ -21,6 +25,14 @@
   <button id="copiar" type="button">Copiar cookie</button>
   <div id="status" role="status"></div>
   <a href="https://www.mercadolivre.com.br/afiliados/linkbuilder" target="_blank" rel="noopener">Abrir o gerador de links do ML</a>
+  <hr>
+  <h1>Envio automático</h1>
+  <p>Com o código do painel, a extensão manda o cookie sozinha todo dia, enquanto este navegador estiver aberto e logado no Mercado Livre.</p>
+  <input id="codigo" type="password" placeholder="Código da extensão" autocomplete="off">
+  <button id="ligar" type="button">Ligar envio automático</button>
+  <button id="desligar" type="button" class="leve" hidden>Desligar envio automático</button>
+  <div id="auto" role="status"></div>
+  <script src="common.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

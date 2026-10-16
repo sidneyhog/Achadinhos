@@ -17,6 +17,7 @@ import { marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace } from "./deals/statusPolicy";
+import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
 
 export type AuthUser = {
   id: number;
@@ -761,6 +762,43 @@ app.get("/api/dashboard", auth, async (req, res, next) => {
   }
 });
 
+// Gera (ou troca) a chave da extensão. A chave aparece uma vez; o banco guarda só o hash.
+app.post("/api/extension-key", auth, async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    if (!canSeeSecrets(req)) return res.status(403).json({ error: "Só o dono ou um administrador gera a chave da extensão" });
+    const { key, hash } = newExtensionKey();
+    await q("UPDATE settings SET ext_key_hash = $2 WHERE company_id = $1", [companyId, hash]);
+    await audit(companyId, null, "extension_key", "Nova chave da extensão do Mercado Livre", ipOf(req));
+    res.json({ key });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A extensão manda o cookie do Mercado Livre sozinha, com a chave gerada no painel.
+app.post("/api/extension/ml-cookie", async (req, res, next) => {
+  try {
+    const ipKey = `ext-cookie:${ipOf(req)}`;
+    if (limited(ipKey, 30, 10 * 60_000)) return res.status(429).json({ error: "Muitos envios. Tente de novo em alguns minutos." });
+    hit(ipKey);
+    const key = String(req.headers["x-achadinhos-key"] || "");
+    if (!looksLikeExtensionKey(key)) return res.status(401).json({ error: "Chave da extensão inválida. Gere outra no painel." });
+    const row = await one<{ company_id: number }>("SELECT company_id FROM settings WHERE ext_key_hash = $1", [hashExtensionKey(key)]);
+    if (!row) return res.status(401).json({ error: "Chave da extensão inválida. Gere outra no painel." });
+    const cookie = String(req.body?.cookie || "").trim();
+    if (!isMlSessionCookie(cookie)) return res.status(400).json({ error: "Sem login no Mercado Livre neste navegador." });
+    const expiresAt = mercadoLivreCookieExpiry(cookie);
+    await q(
+      "UPDATE settings SET ml_cookie_enc = $2, ml_cookie_expires_at = $3, ml_official = true, ml_cookie_synced_at = now() WHERE company_id = $1",
+      [row.company_id, encrypt(cookie), expiresAt]
+    );
+    res.json({ ok: true, expiresAt });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/api/settings", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
@@ -768,7 +806,7 @@ app.get("/api/settings", auth, async (req, res, next) => {
     const cookie = decrypt(String((setting as { ml_cookie_enc?: string })?.ml_cookie_enc || ""));
     res.json({
       setting: setting
-        ? { ...setting, ml_cookie_enc: undefined, mlCookie: canSeeSecrets(req) ? cookie : "", mlCookieSet: Boolean(cookie), mlCookieExpiresAt: cookie ? mercadoLivreCookieExpiry(cookie) : (setting as { ml_cookie_expires_at?: string }).ml_cookie_expires_at }
+        ? { ...setting, ml_cookie_enc: undefined, ext_key_hash: undefined, extKeySet: Boolean((setting as { ext_key_hash?: string }).ext_key_hash), mlCookie: canSeeSecrets(req) ? cookie : "", mlCookieSet: Boolean(cookie), mlCookieExpiresAt: cookie ? mercadoLivreCookieExpiry(cookie) : (setting as { ml_cookie_expires_at?: string }).ml_cookie_expires_at }
         : null
     });
   } catch (err) {

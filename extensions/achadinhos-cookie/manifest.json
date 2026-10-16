@@ -1,12 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Achadinhos - Copiar cookie",
-  "version": "1.0.0",
-  "description": "Copia o cookie da sua sessão do Mercado Livre para colar no painel do Achadinhos.",
-  "permissions": ["cookies"],
+  "name": "Achadinhos - Cookie do Mercado Livre",
+  "version": "1.1.0",
+  "description": "Copia o cookie da sua sessão do Mercado Livre ou manda sozinho para o painel do Achadinhos todo dia.",
+  "permissions": ["cookies", "alarms", "storage"],
   "host_permissions": ["https://*.mercadolivre.com.br/*", "https://*.mercadolivre.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
-    "default_title": "Copiar cookie",
+    "default_title": "Cookie do Mercado Livre",
     "default_popup": "popup.html"
   }
 }

@@ -54,6 +54,8 @@ export const migrate = async () => {
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS send_cadence JSONB NOT NULL DEFAULT '{}';
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS interval_seconds INTEGER;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS posts_per_cycle INTEGER;
+    ALTER TABLE settings ADD COLUMN IF NOT EXISTS ext_key_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN IF NOT EXISTS ml_cookie_synced_at TIMESTAMPTZ;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_per_day INTEGER NOT NULL DEFAULT 6;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_gap_minutes INTEGER NOT NULL DEFAULT 60;

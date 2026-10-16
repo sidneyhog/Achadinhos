@@ -161,3 +161,15 @@ test("Status vai para os participantes dos grupos, sem repetir e sem o próprio 
   assert.deepEqual(list, ["111@lid", "222@lid"]);
   assert.equal(statusRecipients([{ id: "1@lid" }, { id: "2@lid" }, { id: "3@lid" }], [], 2).length, 2);
 });
+
+test("chave da extensão: formato, hash estável e cookie com sessão do ML", async () => {
+  const { newExtensionKey, hashExtensionKey, looksLikeExtensionKey, isMlSessionCookie } = await import("../src/deals/extensionKey");
+  const { key, hash } = newExtensionKey();
+  assert.ok(looksLikeExtensionKey(key));
+  assert.equal(hashExtensionKey(key), hash);
+  assert.notEqual(newExtensionKey().hash, hash, "cada chave é nova");
+  assert.equal(looksLikeExtensionKey("ach_123"), false);
+  assert.equal(isMlSessionCookie("_d2id=abc; ssid=ghy-123; nsa_rotok=x.y.z"), true);
+  assert.equal(isMlSessionCookie("_d2id=abc; nsa_rotok=x.y.z"), false, "sem ssid não é sessão");
+  assert.equal(isMlSessionCookie(`ssid=1; x=${"a".repeat(20_001)}`), false, "texto gigante é recusado");
+});

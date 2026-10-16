@@ -1,47 +1,69 @@
-// Monta o mesmo cabeçalho Cookie que o navegador manda para o gerador de links do ML.
-// Nada sai do navegador: o texto vai só para a área de transferência.
-const ALVO = "https://www.mercadolivre.com.br/afiliados/linkbuilder";
-
 const status = document.getElementById("status");
 const botao = document.getElementById("copiar");
+const campo = document.getElementById("codigo");
+const ligar = document.getElementById("ligar");
+const desligar = document.getElementById("desligar");
+const auto = document.getElementById("auto");
 
-const avisar = (texto, tipo) => {
-  status.textContent = texto;
-  status.className = tipo;
+const avisar = (alvo, texto, tipo) => {
+  alvo.textContent = texto;
+  alvo.className = tipo;
 };
 
-/** Validade do nsa_rotok (JWT). O painel usa o mesmo campo para avisar antes de vencer. */
-const validade = (valor) => {
-  try {
-    const parte = decodeURIComponent(valor).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const exp = Number(JSON.parse(atob(parte)).exp);
-    return Number.isFinite(exp) ? new Date(exp * 1000) : null;
-  } catch {
-    return null;
-  }
+const data = (valor) => new Date(valor).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
+const mostrarAuto = async () => {
+  const { codigo, ultimo } = await chrome.storage.local.get(["codigo", "ultimo"]);
+  const ligado = Boolean(lerCodigo(codigo));
+  campo.hidden = ligado;
+  ligar.hidden = ligado;
+  desligar.hidden = !ligado;
+  if (!ligado) return avisar(auto, "Cole o código gerado no painel em Automação.", "");
+  if (!ultimo) return avisar(auto, "Ligado. O primeiro envio sai em instantes.", "ok");
+  avisar(
+    auto,
+    ultimo.ok
+      ? `Ligado. Último envio: ${data(ultimo.em)}.${ultimo.ate ? ` Cookie válido até ${new Date(ultimo.ate).toLocaleDateString("pt-BR")}.` : ""}`
+      : `Ligado, mas o último envio (${data(ultimo.em)}) falhou: ${ultimo.erro}`,
+    ultimo.ok ? "ok" : "erro"
+  );
 };
 
 botao.addEventListener("click", async () => {
   botao.disabled = true;
   try {
-    const cookies = await chrome.cookies.getAll({ url: ALVO });
-    const nomes = new Set(cookies.map((cookie) => cookie.name));
-    if (!nomes.has("ssid")) {
-      avisar("Você não está logado no Mercado Livre neste navegador. Entre na conta e tente de novo.", "erro");
+    const cookie = await lerCookie();
+    if (!cookie) {
+      avisar(status, "Você não está logado no Mercado Livre neste navegador. Entre na conta e tente de novo.", "erro");
       return;
     }
-    const texto = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-    await navigator.clipboard.writeText(texto);
-    const ate = validade(cookies.find((cookie) => cookie.name === "nsa_rotok")?.value || "");
+    await navigator.clipboard.writeText(cookie.texto);
     avisar(
-      ate
-        ? `Copiado. Válido até ${ate.toLocaleDateString("pt-BR")}. Cole no painel e salve.`
-        : "Copiado. Cole no painel e salve.",
+      status,
+      cookie.ate ? `Copiado. Válido até ${cookie.ate.toLocaleDateString("pt-BR")}. Cole no painel e salve.` : "Copiado. Cole no painel e salve.",
       "ok"
     );
   } catch (err) {
-    avisar(`Não consegui copiar: ${err?.message || err}`, "erro");
+    avisar(status, `Não consegui copiar: ${err?.message || err}`, "erro");
   } finally {
     botao.disabled = false;
   }
 });
+
+ligar.addEventListener("click", async () => {
+  if (!lerCodigo(campo.value)) return avisar(auto, "Código inválido. Copie de novo no painel, em Automação.", "erro");
+  ligar.disabled = true;
+  await chrome.storage.local.set({ codigo: campo.value.trim(), ultimo: null });
+  campo.value = "";
+  avisar(auto, "Enviando…", "");
+  await chrome.runtime.sendMessage({ tipo: "enviar" });
+  ligar.disabled = false;
+  await mostrarAuto();
+});
+
+desligar.addEventListener("click", async () => {
+  await chrome.storage.local.remove(["codigo", "ultimo"]);
+  await mostrarAuto();
+});
+
+void mostrarAuto();

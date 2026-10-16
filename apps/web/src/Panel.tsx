@@ -864,6 +864,7 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
   const [offerSort, setOfferSort] = useState("recent");
   const [offerView, setOfferView] = useState("cards");
   const [envioNote, setEnvioNote] = useState("");
+  const [extCode, setExtCode] = useState("");
   const [envioConn, setEnvioConn] = useState<number | "">("");
   const [configNote, setConfigNote] = useState("");
   const [notices, setNotices] = useState<Array<{ id: number; tone: "ok" | "bad"; title: string; text: string }>>([]);
@@ -2306,6 +2307,26 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
                   <article key={title}><b>{index + 1}</b><div><strong>{title}</strong><span>{text}</span></div></article>
                 ))}
               </div>
+              <section className="aff-ext">
+                <div>
+                  <strong>Envio automático do cookie</strong>
+                  <p>Gere o código, cole na extensão em Envio automático e clique em Ligar. A extensão manda o cookie sozinha duas vezes por dia e sempre que o Mercado Livre renova a sessão, enquanto o navegador estiver aberto e logado.</p>
+                  <p>{setting?.ml_cookie_synced_at ? `Último envio automático: ${new Date(setting.ml_cookie_synced_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.` : setting?.extKeySet ? "Código gerado. Nenhum envio automático chegou ainda." : "Envio automático ainda não ligado."}</p>
+                  {extCode ? <p><code style={{ wordBreak: "break-all" }}>{extCode}</code><br />O código aparece só agora. Gerar outro desliga o anterior.</p> : null}
+                </div>
+                <button type="button" className="is-solid aff-ext__btn" onClick={async () => {
+                  try {
+                    const data = await api<{ key: string }>("/api/extension-key", { method: "POST" });
+                    const code = `${window.location.origin}|${data.key}`;
+                    setExtCode(code);
+                    await navigator.clipboard.writeText(code).catch(() => undefined);
+                    await reload();
+                    tell("Código gerado", "Copiado. Cole na extensão, em Envio automático.");
+                  } catch (err) {
+                    tell("Não gerou", err instanceof Error ? err.message : "Não foi possível gerar o código", "bad");
+                  }
+                }}>{setting?.extKeySet ? "Gerar novo código" : "Gerar código"}</button>
+              </section>
             </section>
           )}
 
