@@ -110,6 +110,87 @@ const cardToOffer = (card: any): DealOffer | null => {
   };
 };
 
+/** Procura cartões de produto (formato "polycard": metadata.id + metadata.url + components) em qualquer lugar do objeto. */
+const findCards = (root: unknown): any[] => {
+  const found: any[] = [];
+  const seen = new Set<unknown>();
+  const walk = (node: unknown, depth: number) => {
+    if (!node || typeof node !== "object" || depth > 40 || seen.has(node)) return;
+    seen.add(node);
+    const value = node as Record<string, any>;
+    if (value.metadata?.id && value.metadata?.url && Array.isArray(value.components)) {
+      found.push(value);
+      return;
+    }
+    for (const child of Array.isArray(node) ? node : Object.values(value)) walk(child, depth + 1);
+  };
+  walk(root, 0);
+  return found;
+};
+
+/** Reserva: produtos nos dados estruturados (JSON-LD) que a página publica para buscadores. */
+const fromJsonLd = (html: string): DealOffer[] => {
+  const offers: DealOffer[] = [];
+  const blocks = html.match(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi) || [];
+  const products: any[] = [];
+  const collect = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(collect);
+    if (node["@type"] === "Product") products.push(node);
+    if (node.item) collect(node.item);
+    if (node.itemListElement) collect(node.itemListElement);
+    if (node["@graph"]) collect(node["@graph"]);
+  };
+  for (const block of blocks) {
+    try {
+      collect(JSON.parse(block.replace(/^<script[^>]*>/i, "").replace(/<\/script>$/i, "")));
+    } catch {
+      /* bloco inválido: ignora */
+    }
+  }
+  for (const product of products) {
+    const offer = Array.isArray(product.offers) ? product.offers[0] : product.offers;
+    const price = Number(offer?.price ?? offer?.lowPrice);
+    const url = String(product.url || offer?.url || "");
+    const id = (url.match(/MLB-?\d+/i)?.[0] || String(product.sku || product.productID || "")).replace("-", "");
+    const title = String(product.name || "").trim();
+    if (!id || !title || !url || !Number.isFinite(price)) continue;
+    const image = Array.isArray(product.image) ? product.image[0] : product.image;
+    offers.push({
+      externalId: id,
+      title,
+      priceCents: Math.round(price * 100),
+      url: url.startsWith("http") ? url : `https://${url}`,
+      imageUrl: typeof image === "string" ? image : undefined,
+      marketplace: "ml",
+      category: ""
+    });
+  }
+  return offers;
+};
+
+/** Ofertas da página /ofertas do ML. Exportada para teste. */
+export const offersFromOffersPage = (html: string): { offers: DealOffer[]; how: string; keys: string } => {
+  let parsed: any = null;
+  try {
+    parsed = extractObject(html, "__NORDIC_RENDERING_CTX__");
+  } catch {
+    parsed = null;
+  }
+  const direct = parsed?.appProps?.pageProps?.data?.items;
+  if (Array.isArray(direct) && direct.length) {
+    const offers = direct.map((item: any) => cardToOffer(item?.card)).filter((offer): offer is DealOffer => !!offer);
+    if (offers.length) return { offers, how: "lista padrão", keys: "" };
+  }
+  const deep = findCards(parsed).map(cardToOffer).filter((offer): offer is DealOffer => !!offer);
+  if (deep.length) return { offers: deep, how: "cartões encontrados na página", keys: "" };
+  const ld = fromJsonLd(html);
+  if (ld.length) return { offers: ld, how: "dados estruturados", keys: "" };
+  const data = parsed?.appProps?.pageProps?.data;
+  const keys = data && typeof data === "object" ? Object.keys(data).slice(0, 12).join(",") : parsed ? Object.keys(parsed).slice(0, 12).join(",") : "";
+  return { offers: [], how: "", keys };
+};
+
 let catalogCache: { at: number; offers: DealOffer[] } | null = null;
 
 /** O que o ML respondeu na última tentativa; vai para a mensagem de erro do painel quando não vem nenhuma oferta. */
@@ -138,22 +219,14 @@ const loadOfferCatalog = async (): Promise<DealOffer[]> => {
         }
       });
       const html = String(response.data);
-      let parsed: any = null;
-      try {
-        parsed = extractObject(html, "__NORDIC_RENDERING_CTX__");
-      } catch {
-        parsed = null;
+      const result = offersFromOffersPage(html);
+      if (page === 1) {
+        lastFetch.page = pageSummary(response.status, html, result.offers.length) + (result.keys ? `, chaves: ${result.keys}` : "");
       }
-      const items = parsed?.appProps?.pageProps?.data?.items;
-      const list = Array.isArray(items) ? items : [];
-      if (page === 1) lastFetch.page = pageSummary(response.status, html, list.length);
-      return list;
+      return result.offers;
     })
   );
-  const offers = pages
-    .flat()
-    .map(item => cardToOffer(item?.card))
-    .filter((offer): offer is DealOffer => !!offer);
+  const offers = pages.flat();
   catalogCache = { at: Date.now(), offers };
   return offers;
 };

@@ -64,3 +64,31 @@ test("segredos automáticos: gera uma vez, reaproveita e respeita o ambiente", a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Mercado Livre: acha ofertas na lista padrão, em outro lugar da página e no JSON-LD", async () => {
+  const { offersFromOffersPage } = await import("../src/deals/searchMercadoLivre");
+  const card = (id: string, title: string, price: number) => ({
+    metadata: { id, url: `produto.mercadolivre.com.br/${id}-x` },
+    components: [{ type: "title", title: { text: title } }, { type: "price", price: { current_price: { value: price } } }]
+  });
+  const page = (ctx: unknown) => `<html><title>Mercado Libre</title><script>window.__NORDIC_RENDERING_CTX__ = ${JSON.stringify(ctx)};</script></html>`;
+
+  const antigo = offersFromOffersPage(page({ appProps: { pageProps: { data: { items: [{ card: card("MLB1", "Fone", 99.9) }] } } } }));
+  assert.equal(antigo.offers.length, 1);
+  assert.equal(antigo.how, "lista padrão");
+  assert.equal(antigo.offers[0].priceCents, 9990);
+
+  const mudou = offersFromOffersPage(page({ appProps: { pageProps: { data: { sections: [{ content: { polycards: [card("MLB2", "Air fryer", 300), card("MLB3", "Mouse", 50)] } }] } } } }));
+  assert.equal(mudou.offers.length, 2, "cartões fora da lista padrão também são lidos");
+  assert.equal(mudou.how, "cartões encontrados na página");
+
+  const ld = `<html><script type="application/ld+json">${JSON.stringify({ "@type": "ItemList", itemListElement: [{ item: { "@type": "Product", name: "Cafeteira", url: "https://produto.mercadolivre.com.br/MLB-123-cafeteira", offers: { price: "149.90" } } }] })}</script></html>`;
+  const viaLd = offersFromOffersPage(ld);
+  assert.equal(viaLd.offers.length, 1);
+  assert.equal(viaLd.offers[0].externalId, "MLB123");
+  assert.equal(viaLd.how, "dados estruturados");
+
+  const vazio = offersFromOffersPage(page({ appProps: { pageProps: { data: { banners: [], filtros: {} } } } }));
+  assert.equal(vazio.offers.length, 0);
+  assert.equal(vazio.keys, "banners,filtros", "sem ofertas, mostra as chaves para diagnóstico");
+});
