@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56">
+  <rect x="4" y="8" width="40" height="40" rx="8" fill="#e10600"/>
+  <path d="M24 16h4v8h8v4h-8v8h-4v-8h-8v-4h8z" fill="#fff"/>
+  <text x="138" y="26" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="800" fill="#e10600">PAGUE</text>
+  <text x="138" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="800" fill="#111">MENOS</text>
+</svg>

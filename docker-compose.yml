@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: achadinhos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-achadinhos}
+      POSTGRES_DB: achadinhos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U achadinhos"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build: ./apps/api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://achadinhos:${POSTGRES_PASSWORD:-achadinhos}@postgres:5432/achadinhos
+      REDIS_URL: redis://redis:6379
+      ZAPO_AUTH_DIR: /data/zapo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - zapodata:/data/zapo
+
+  worker:
+    build: ./apps/api
+    restart: unless-stopped
+    command: npx tsx src/worker.ts
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://achadinhos:${POSTGRES_PASSWORD:-achadinhos}@postgres:5432/achadinhos
+      REDIS_URL: redis://redis:6379
+      ZAPO_AUTH_DIR: /data/zapo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - zapodata:/data/zapo
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  zapodata:

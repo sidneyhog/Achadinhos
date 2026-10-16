@@ -1,0 +1,14 @@
+---
+description: Depois de cada alteração pedida, gravar commit e enviar para o GitHub
+alwaysApply: true
+---
+
+# Commit e push
+
+Quando uma alteração pedida pelo usuário ficar pronta, grave um commit e envie para o remoto `origin` na branch atual.
+
+- Inclua os arquivos da alteração. Deixe de fora `.env`, credenciais, certificados e outros segredos.
+- Não altere a configuração do Git.
+- Não use `--no-verify`, force push nem amend, a menos que o usuário peça.
+- Se não houver mudança, não crie commit vazio.
+- A mensagem explica o porquê, em uma ou duas frases.

@@ -1,0 +1,4 @@
+**/node_modules
+**/.zapo-auth
+.git
+*.sqlite
