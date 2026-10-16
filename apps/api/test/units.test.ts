@@ -125,6 +125,45 @@ test("Mercado Livre: reconhece a página de verificação de conta (bloqueio sem
   assert.equal(result.offers.length, 0);
 });
 
+test("Mercado Livre: lê o cartão real da página /ofertas logada e separa da parede sem login", async () => {
+  const { offersFromOffersPage } = await import("../src/deals/searchMercadoLivre");
+  // Trecho real de /ofertas com sessão logada em 16/10/2026 (1º de 48 itens; campos de sessão e rastreio removidos).
+  const card = {
+    metadata: { id: "MLB5187281878", variation_id: "186130844567", pid: "MLBI5187281878", pid_extended: "MLBI5187281878", url: "produto.mercadolivre.com.br/MLB-5187281878-camisa-gola-polo-masculina-pique-premium-algodo-confortavel-_JM", card_type: "grid-card", vertical: "" },
+    pictures: { scale: "FILL", pictures: [{ id: "804138-MLB113502958558_072026" }], square: "Q", alt_text: "Imagem", sanitized_title: "-camisa-gola-polo-masculina-pique-premium-algodo-confortavel", overlay: true, variation_id: "186130844567" },
+    components: [
+      { type: "title", id: "title", title: { text: "Camisa Gola Polo Masculina Pique Premium Algodão Confortável", long_title: false, title_tag: "h3" } },
+      { type: "seller", id: "seller", seller: { text: "mm {icon_cockade}", values: [{ key: "icon_cockade", type: "icon", icon: { key: "icon_cockade", alt_text: "Loja oficial", icon_id: "icon_cockade" } }] } },
+      { type: "review_compacted", id: "review_compacted", review_compacted: { text: "{icon_star_fill} {label} {label2}", alt_text: "Classificação 4.7 de 5 estrelas. Mais de 100mil produtos vendidos.", values: [{ key: "icon_star_fill", type: "icon", icon: { key: "icon_star_fill", icon_id: "icon_star_fill" } }, { key: "label", type: "label", label: { text: "4.7" } }, { key: "label2", type: "label", label: { text: "| +100mil vendidos" } }] } },
+      { type: "price", id: "price_v2", price: { price_labels: [{ version: "1", text: "{previous_price}", values: [{ type: "price", key: "previous_price", price: { value: 54.9, currency: "BRL", previous: true } }] }], discount_polylabel: { version: "1", text: "{previous_label}", values: [{ type: "pill", key: "previous_label", pill: { text: "38% OFF" } }] }, current_price: { value: 33.9, currency: "BRL", weight: "regular" } } },
+      { type: "shipping_v2", id: "shipping_v2", shipping_v2: [{ version: "1", text: "{next_day_free_shipping} {full_icon}", values: [{ type: "pill", key: "next_day_free_shipping", pill: { text: "Chegará grátis amanhã" } }, { type: "icon", key: "full_icon", icon: { key: "vpp_full_icon", alt_text: "Enviado pelo FULL" } }] }] }
+    ]
+  };
+  const logada = { title: "Ofertas | Mercadolivre Brasil", scopes: {}, flags: {}, support: {}, framework: {}, mainEntry: "desktopView", appProps: { pageProps: { data: { siteId: "MLB", paging: {}, items: [{ card, position: 1, type: "ORGANIC_ITEM" }] }, siteId: "MLB" } } };
+  const script = (ctx: unknown) => `<html><head><title>Mercado Libre</title></head><body><script id="__NORDIC_RENDERING_CTX__" nonce="x">_n.ctx.r=${JSON.stringify(ctx)};</script></body></html>`;
+
+  const result = offersFromOffersPage(script(logada), "https://www.mercadolivre.com.br/ofertas");
+  assert.equal(result.blocked, false);
+  assert.equal(result.how, "lista padrão");
+  assert.equal(result.offers.length, 1);
+  const [offer] = result.offers;
+  assert.equal(offer.externalId, "MLB5187281878");
+  assert.equal(offer.title, "Camisa Gola Polo Masculina Pique Premium Algodão Confortável");
+  assert.equal(offer.priceCents, 3390);
+  assert.equal(offer.originalPriceCents, 5490);
+  assert.equal(offer.discountPercent, 38);
+  assert.equal(offer.freeShipping, true);
+  assert.equal(offer.rating, 4.7);
+  assert.equal(offer.soldQuantity, 100000);
+  assert.equal(offer.url, "https://produto.mercadolivre.com.br/MLB-5187281878-camisa-gola-polo-masculina-pique-premium-algodo-confortavel-_JM");
+  assert.equal(offer.imageUrl, "https://http2.mlstatic.com/D_NQ_NP_804138-MLB113502958558_072026-O.webp");
+
+  // Parede sem login com as mesmas chaves de topo vistas na VPS, mesmo sem o mainEntry e o loginType conhecidos.
+  const parede = { flags: {}, assets: {}, support: {}, title: "Mercado Libre", framework: {}, appProps: { pageProps: { deviceType: "desktop", authLinks: { login: "https://www.mercadolivre.com/jms/mlb/lgz/login" } } }, mainEntry: "outra-pagina" };
+  assert.equal(offersFromOffersPage(script(parede)).blocked, true, "pageProps sem data e com authLinks é a parede");
+  assert.equal(offersFromOffersPage("<html></html>", "https://www.mercadolivre.com.br/gz/account-verification?go=x").blocked, true, "redirecionou para /gz/account-verification");
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");

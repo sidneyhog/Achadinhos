@@ -173,15 +173,20 @@ const fromJsonLd = (html: string): DealOffer[] => {
 /**
  * Sem login, o ML redireciona (302) /ofertas e lista.* para /gz/account-verification ("negative_traffic").
  * O axios segue o redirecionamento e recebe HTTP 200 com __NORDIC_RENDERING_CTX__, mas sem nenhum produto.
+ * Essa parede tem só flags, assets, support, title, framework, appProps e mainEntry, e pageProps sem "data" mas com
+ * authLinks. A página logada de verdade tem pageProps.data.items (48 cartões em 16/10/2026).
  */
-const isVerificationWall = (parsed: any, html: string): boolean =>
+const isVerificationWall = (parsed: any, html: string, finalUrl = ""): boolean =>
+  /\/gz\/account-verification/i.test(finalUrl) ||
   /account-verification/i.test(String(parsed?.mainEntry || "")) ||
   /loginType=negative_traffic/i.test(JSON.stringify(parsed?.appProps?.pageProps?.authLinks || "")) ||
+  (!!parsed?.appProps?.pageProps?.authLinks && !parsed?.appProps?.pageProps?.data) ||
   (!parsed && /\/gz\/account-verification/i.test(html));
 
-/** Ofertas da página /ofertas do ML. Exportada para teste. */
+/** Ofertas da página /ofertas do ML. `finalUrl` é o endereço depois dos redirecionamentos. Exportada para teste. */
 export const offersFromOffersPage = (
-  html: string
+  html: string,
+  finalUrl = ""
 ): { offers: DealOffer[]; how: string; keys: string; blocked: boolean } => {
   let parsed: any = null;
   try {
@@ -189,7 +194,7 @@ export const offersFromOffersPage = (
   } catch {
     parsed = null;
   }
-  if (isVerificationWall(parsed, html)) return { offers: [], how: "", keys: "", blocked: true };
+  if (isVerificationWall(parsed, html, finalUrl)) return { offers: [], how: "", keys: "", blocked: true };
   const direct = parsed?.appProps?.pageProps?.data?.items;
   if (Array.isArray(direct) && direct.length) {
     const offers = direct.map((item: any) => cardToOffer(item?.card)).filter((offer): offer is DealOffer => !!offer);
@@ -243,7 +248,8 @@ const loadOfferCatalog = async (cookie = ""): Promise<DealOffer[]> => {
         headers: offersPageHeaders(cookie)
       });
       const html = String(response.data);
-      const result = offersFromOffersPage(html);
+      const finalUrl = String((response.request as any)?.res?.responseUrl || "");
+      const result = offersFromOffersPage(html, finalUrl);
       if (page === 1) {
         lastFetch.page = result.blocked
           ? cookie
