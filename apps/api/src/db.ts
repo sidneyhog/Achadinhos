@@ -54,6 +54,9 @@ export const migrate = async () => {
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS send_cadence JSONB NOT NULL DEFAULT '{}';
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS interval_seconds INTEGER;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS posts_per_cycle INTEGER;
+    ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_per_day INTEGER NOT NULL DEFAULT 6;
+    ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_gap_minutes INTEGER NOT NULL DEFAULT 60;
     ALTER TABLE posts ADD COLUMN IF NOT EXISTS whatsapp_id INTEGER;
     ALTER TABLE groups DROP CONSTRAINT IF EXISTS groups_company_id_group_jid_key;
     CREATE UNIQUE INDEX IF NOT EXISTS groups_company_whatsapp_jid ON groups (company_id, whatsapp_id, group_jid);

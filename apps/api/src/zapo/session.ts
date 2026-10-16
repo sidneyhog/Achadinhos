@@ -9,6 +9,9 @@ export type LiveSession = {
     message: {
       send: (jid: string, content: unknown) => Promise<unknown>;
     };
+    status?: {
+      send: (input: { content: unknown; recipients: readonly string[] }) => Promise<unknown>;
+    };
     group?: {
       queryAllGroups?: () => Promise<Array<{ jid: string; subject?: string; size?: number; participants?: unknown[] }>>;
       queryGroupMetadata?: (jid: string) => Promise<{
@@ -168,4 +171,14 @@ export const sendImage = async (whatsappId: number, jid: string, media: Buffer, 
   const session = live.get(whatsappId);
   if (!session) throw new Error("WhatsApp desconectado");
   await session.client.message.send(jid, { type: "image", media, mimetype: "image/jpeg", caption });
+};
+
+/** Publica no Status (status@broadcast); o WhatsApp só entrega a quem está em `recipients`. */
+export const sendStatus = async (whatsappId: number, recipients: string[], media: Buffer | null, caption: string) => {
+  const session = live.get(whatsappId);
+  if (!session) throw new Error("WhatsApp desconectado");
+  if (!session.client.status?.send) throw new Error("Esta versão do zapo-js não publica Status");
+  if (!recipients.length) throw new Error("Status sem destinatários: os grupos da conexão não têm participantes");
+  const content = media ? { type: "image", media, mimetype: "image/jpeg", caption } : caption;
+  await session.client.status.send({ content, recipients });
 };

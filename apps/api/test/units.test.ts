@@ -131,3 +131,33 @@ test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", asyn
   assert.equal("Cookie" in offersPageHeaders(""), false, "sem cookie salvo, não manda cabeçalho vazio");
   assert.equal("Cookie" in offersPageHeaders(), false);
 });
+
+test("Status respeita o limite diário e o espaço mínimo entre publicações", async () => {
+  const { statusAllowed, clampStatusPace, STATUS_LIMITS } = await import("../src/deals/statusPolicy");
+  const now = Date.parse("2026-10-16T15:00:00Z");
+  const pace = { perDay: 3, gapMinutes: 60 };
+  assert.equal(statusAllowed({ ...pace, sentToday: 0, lastAt: null, now }), true, "primeiro Status do dia sai");
+  assert.equal(statusAllowed({ ...pace, sentToday: 1, lastAt: now - 30 * 60_000, now }), false, "30 min depois ainda espera");
+  assert.equal(statusAllowed({ ...pace, sentToday: 1, lastAt: now - 61 * 60_000, now }), true, "passada 1 h, libera");
+  assert.equal(statusAllowed({ ...pace, sentToday: 3, lastAt: now - 5 * 3600_000, now }), false, "bateu o limite do dia");
+  assert.deepEqual(clampStatusPace({ perDay: 999, gapMinutes: 1 }), { perDay: STATUS_LIMITS.maxPerDay, gapMinutes: STATUS_LIMITS.minGapMinutes });
+  assert.deepEqual(clampStatusPace({ perDay: null, gapMinutes: "x" }), { perDay: STATUS_LIMITS.defaultPerDay, gapMinutes: STATUS_LIMITS.defaultGapMinutes });
+  assert.equal(statusAllowed({ perDay: 999, gapMinutes: 0, sentToday: 30, lastAt: null, now }), false, "teto vale mesmo com valor salvo alto");
+});
+
+test("Status vai para os participantes dos grupos, sem repetir e sem o próprio número", async () => {
+  const { statusRecipients } = await import("../src/deals/statusPolicy");
+  const list = statusRecipients(
+    [
+      { id: "111@lid" },
+      { jid: "5519999990000@s.whatsapp.net", lid: "222@lid" },
+      { id: "111:3@lid" },
+      { id: "333@lid" },
+      { id: "120363@g.us" },
+      { id: "5519988887777@s.whatsapp.net" }
+    ],
+    ["5519988887777@s.whatsapp.net", "333:12@lid"]
+  );
+  assert.deepEqual(list, ["111@lid", "222@lid"]);
+  assert.equal(statusRecipients([{ id: "1@lid" }, { id: "2@lid" }, { id: "3@lid" }], [], 2).length, 2);
+});

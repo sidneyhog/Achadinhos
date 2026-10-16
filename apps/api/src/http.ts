@@ -16,6 +16,7 @@ import { createOfficialMlLink, mercadoLivreCookieExpiry, reportMlLink, stripMlTr
 import { marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
+import { clampStatusPace } from "./deals/statusPolicy";
 
 export type AuthUser = {
   id: number;
@@ -986,7 +987,7 @@ app.get("/api/connections", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const sessions = await q(
       `SELECT id, name, status, phone, qr, enabled, stores, selected, last_error, created_at, connected_at, qr_at,
-              send_cadence, interval_seconds, posts_per_cycle,
+              send_cadence, interval_seconds, posts_per_cycle, status_enabled, status_per_day, status_gap_minutes,
               (SELECT count(*)::int FROM groups g WHERE g.whatsapp_id = whatsapp_sessions.id AND g.enabled = true) AS active_groups
        FROM whatsapp_sessions WHERE company_id = $1 ORDER BY id`,
       [companyId]
@@ -1038,6 +1039,8 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
     const cadence = req.body?.sendCadence && typeof req.body.sendCadence === "object" ? JSON.stringify(req.body.sendCadence) : null;
     const interval = req.body?.intervalSeconds == null ? null : Math.min(180, Math.max(5, Number(req.body.intervalSeconds) || 20));
     const posts = req.body?.postsPerCycle == null ? null : Math.min(5, Math.max(1, Math.round(Number(req.body.postsPerCycle) || 1)));
+    const statusOn = typeof req.body?.statusEnabled === "boolean" ? req.body.statusEnabled : null;
+    const statusPace = clampStatusPace({ perDay: req.body?.statusPerDay, gapMinutes: req.body?.statusGapMinutes });
     await q(
       `UPDATE whatsapp_sessions SET
          enabled = COALESCE($3, enabled),
@@ -1045,9 +1048,24 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
          name = COALESCE($5, name),
          send_cadence = COALESCE($6::jsonb, send_cadence),
          interval_seconds = COALESCE($7, interval_seconds),
-         posts_per_cycle = COALESCE($8, posts_per_cycle)
+         posts_per_cycle = COALESCE($8, posts_per_cycle),
+         status_enabled = COALESCE($9, status_enabled),
+         status_per_day = COALESCE($10, status_per_day),
+         status_gap_minutes = COALESCE($11, status_gap_minutes)
        WHERE id = $1 AND company_id = $2`,
-      [Number(req.params.id), companyId, req.body?.enabled ?? null, stores ? JSON.stringify(stores) : null, req.body?.name ?? null, cadence, interval, posts]
+      [
+        Number(req.params.id),
+        companyId,
+        req.body?.enabled ?? null,
+        stores ? JSON.stringify(stores) : null,
+        req.body?.name ?? null,
+        cadence,
+        interval,
+        posts,
+        statusOn,
+        req.body?.statusPerDay == null ? null : statusPace.perDay,
+        req.body?.statusGapMinutes == null ? null : statusPace.gapMinutes
+      ]
     );
     res.json({ ok: true });
   } catch (err) {

@@ -3,7 +3,7 @@ import axios from "axios";
 import { audit, q } from "../db";
 import { withLock } from "../locks";
 import { decrypt } from "../secrets";
-import { sendImage, sendText, getLive } from "../zapo/session";
+import { sendImage, sendStatus, sendText, getLive } from "../zapo/session";
 import { searchMercadoLivre, offerEndsSoonText } from "../deals/searchMercadoLivre";
 import { searchAmazon } from "../deals/searchAmazon";
 import { amazonOffersFromLinks } from "../deals/amazonLinks";
@@ -14,6 +14,7 @@ import { searchRakuten } from "../deals/searchRakuten";
 import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
+import { STATUS_JID, clampStatusPace, statusAllowed, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
   resolveMlTracking,
@@ -110,6 +111,24 @@ const textMatches = (offer: DealOffer, categories: string) => {
   if (!words.length) return true;
   const hay = `${offer.title} ${offer.category || ""}`.toLowerCase();
   return words.some(word => hay.includes(word));
+};
+
+/** Participantes dos grupos da conexão: é quem vai ver o Status. */
+const loadStatusRecipients = async (whatsappId: number, groups: Array<{ group_jid: string }>) => {
+  const session = getLive(whatsappId);
+  const query = session?.client.group?.queryGroupMetadata;
+  if (!session || !query) return [];
+  const creds = session.client.getCredentials?.() || session.client.auth?.getCredentials?.() || null;
+  const participants: Array<{ id?: string; jid?: string; lid?: string }> = [];
+  for (const group of groups) {
+    try {
+      const meta = await query(group.group_jid);
+      participants.push(...(meta.participants || []));
+    } catch {
+      /* grupo sem leitura: segue com os outros */
+    }
+  }
+  return statusRecipients(participants, [creds?.meJid || "", creds?.meLid || ""]);
 };
 
 const AWIN: Record<string, string> = {
@@ -274,8 +293,18 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
     }
     if (!campaigns.length) return;
 
-    const sessions = await q<{ id: number; stores: string[]; status: string; send_cadence: Record<string, number> | null; interval_seconds: number | null; posts_per_cycle: number | null }>(
-      "SELECT id, stores, status, send_cadence, interval_seconds, posts_per_cycle FROM whatsapp_sessions WHERE company_id = $1 AND enabled = true",
+    const sessions = await q<{
+      id: number;
+      stores: string[];
+      status: string;
+      send_cadence: Record<string, number> | null;
+      interval_seconds: number | null;
+      posts_per_cycle: number | null;
+      status_enabled: boolean;
+      status_per_day: number | null;
+      status_gap_minutes: number | null;
+    }>(
+      "SELECT id, stores, status, send_cadence, interval_seconds, posts_per_cycle, status_enabled, status_per_day, status_gap_minutes FROM whatsapp_sessions WHERE company_id = $1 AND enabled = true",
       [company.id]
     );
     const groups = await q<{ group_jid: string; name: string; categories: string; whatsapp_id: number | null; enabled: boolean }>(
@@ -292,6 +321,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
       lastSent: Map<string, number>;
       posted: Map<string, number>;
       failed: boolean;
+      status: { perDay: number; gapMinutes: number; sentToday: number; lastAt: number | null; recipients: string[] | null; failed: boolean } | null;
     }> = [];
     for (const session of sessions) {
       if (session.status !== "connected" || !getLive(session.id)) continue;
@@ -302,6 +332,21 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         "SELECT marketplace, max(created_at) AS last_at FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND status = 'sent' GROUP BY marketplace",
         [company.id, session.id]
       );
+      let status = null;
+      if (session.status_enabled) {
+        const [today] = await q<{ count: string; last_at: string | null }>(
+          `SELECT count(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'))::text AS count, max(created_at) AS last_at
+           FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent'`,
+          [company.id, session.id, STATUS_JID]
+        );
+        status = {
+          ...clampStatusPace({ perDay: session.status_per_day, gapMinutes: session.status_gap_minutes }),
+          sentToday: Number(today?.count || 0),
+          lastAt: today?.last_at ? new Date(today.last_at).getTime() : null,
+          recipients: null,
+          failed: false
+        };
+      }
       publishers.push({
         id: session.id,
         stores: session.stores || [],
@@ -311,7 +356,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         perCycle: Math.min(5, Math.max(1, Number(session.posts_per_cycle ?? current.posts_per_cycle) || 1)),
         lastSent: new Map(lastRows.map(row => [row.marketplace, new Date(row.last_at).getTime()])),
         posted: new Map(),
-        failed: false
+        failed: false,
+        status
       });
     }
     const bots = await q<{ token_enc: string; enabled: boolean; stores: string[]; chats: Array<{ chatId: string; enabled?: boolean; stores?: string[]; categories?: string; title?: string }> }>(
@@ -417,6 +463,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           if (last && Date.now() - last < cadenceSeconds(pub.cadence, marketplace) * 1000) continue;
           const matching = pub.groups.filter(group => textMatches(offer, group.categories));
           const destinations = (matching.length ? matching : pub.groups).slice(0, 40);
+          let reachedGroup = false;
           for (const group of destinations) {
             const since = await q(
               `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $3 AND external_id = $4) OR url = $5) LIMIT 1`,
@@ -441,6 +488,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
                 [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, group.group_jid, group.name, token, pub.id]
               );
               sent += 1;
+              reachedGroup = true;
               pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
               pub.lastSent.set(marketplace, Date.now());
               await delay(pub.intervalMs);
@@ -452,6 +500,43 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
               );
               await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, String((err as Error).message).slice(0, 400)]);
               break;
+            }
+          }
+          // Status: só o que acabou de sair nos grupos, dentro do limite próprio da conexão.
+          const st = pub.status;
+          if (reachedGroup && st && !st.failed && statusAllowed({ ...st, now: Date.now() })) {
+            const dup = await q(
+              `SELECT id FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' AND created_at > now() - interval '24 hours' AND marketplace = $4 AND external_id = $5 LIMIT 1`,
+              [company.id, pub.id, STATUS_JID, offer.marketplace, offer.externalId]
+            );
+            if (!dup.length) {
+              try {
+                st.recipients ??= await loadStatusRecipients(pub.id, pub.groups);
+                let media: Buffer | null = null;
+                if (offer.imageUrl) {
+                  try {
+                    const image = await axios.get(offer.imageUrl, { responseType: "arraybuffer", timeout: 15000, maxContentLength: 4 * 1024 * 1024 });
+                    media = Buffer.from(image.data);
+                  } catch {
+                    media = null;
+                  }
+                }
+                await sendStatus(pub.id, st.recipients, media, caption(offer, published));
+                await q(
+                  `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Status','sent',$9,$10)`,
+                  [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, crypto.randomBytes(8).toString("hex"), pub.id]
+                );
+                sent += 1;
+                st.sentToday += 1;
+                st.lastAt = Date.now();
+              } catch (err) {
+                st.failed = true;
+                await q(
+                  `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, group_jid, status, error, whatsapp_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'error',$8,$9)`,
+                  [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, offer.url, STATUS_JID, `Status: ${String((err as Error).message)}`.slice(0, 400), pub.id]
+                );
+              }
             }
           }
         }
