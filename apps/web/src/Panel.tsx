@@ -190,8 +190,68 @@ const GUIDES = [
   ["rakuten", "RA", "Rakuten Advertising", "Implementação parcial", "Configurar a Rakuten", "12 min · Lojas · Intermediário", "Client ID, Client Secret e SID liberam a busca de produtos da Rakuten."],
   ["ali", "AE", "AliExpress", "Implementado", "Configurar a AliExpress", "15 min · Lojas · Avançado", "App Key, Secret e Tracking ID. Sem eles a busca de produtos entra no lugar."],
   ["awin", "AW", "Awin", "Implementação parcial", "Configurar a Awin", "10 min · Lojas · Intermediário", "Id do publisher e o token da API. Clube Samsung e Casas Bahia usam a mesma conta."],
-  ["shopee", "SP", "Shopee", "Implementação parcial", "Configurar a Shopee", "15 min · Lojas · Avançado", "A publicação automática espera App ID e Secret da API de afiliados."]
+  ["shopee", "SP", "Shopee", "Implementação parcial", "Configurar a Shopee", "15 min · Lojas · Avançado", "A publicação automática espera App ID e Secret da API de afiliados."],
+  ["amazon", "AM", "Amazon", "Implementação parcial", "Configurar a Amazon", "5 min · Lojas · Iniciante", "A Partner Tag conecta a conta. Sem a API, o robô publica os links que você colar."],
+  ["epoca", "EP", "Época Cosméticos", "Implementado", "Configurar a Época", "5 min · Lojas · Iniciante", "A Época está na Lomadee. Basta a chave da API do painel da Lomadee."]
 ];
+
+/** Passo a passo de cada guia, em linguagem de cliente. Aparece ao clicar em Abrir guia. */
+const GUIDE_STEPS: Record<string, string[]> = {
+  whatsapp: [
+    "Vá em Conexões e clique em Nova conexão. Escolha WhatsApp e dê um nome (ex.: AchadosSp).",
+    "Clique em Conectar WhatsApp. Aparece um QR code.",
+    "No celular: WhatsApp → Aparelhos conectados → Conectar aparelho, e aponte para o QR code.",
+    "Com a conexão verde, marque os grupos que vão receber as ofertas.",
+    "Use um número só para o robô. Se o QR expirar, clique em Gerar novo QR."
+  ],
+  telegram: [
+    "No Telegram, abra o @BotFather, mande /newbot e siga as perguntas. Ele devolve um token (ex.: 123456:ABC...).",
+    "Adicione o bot como administrador no grupo ou canal que vai receber as ofertas.",
+    "No painel, Conexões → Nova conexão → Telegram. Cole o token do BotFather e crie.",
+    "Escolha os chats e as lojas que esse bot publica."
+  ],
+  ml: [
+    "Gere um link de afiliado seu no Mercado Livre e cole em Lojas → Mercado Livre → Colar um link para preencher. Conta e Matt Tool se preenchem sozinhos.",
+    "Baixe a extensão em Automação e instale no Chrome ou no Edge (passo a passo na própria página).",
+    "Logado no Mercado Livre, clique na extensão e em Copiar cookie.",
+    "Cole em Cookie do gerador, deixe Gerar link oficial marcado e salve. O teste deve devolver um link meli.la.",
+    "O cookie vale cerca de 30 dias. O painel avisa 2 dias antes; aí é só copiar e colar de novo."
+  ],
+  shopee: [
+    "No portal de afiliados da Shopee, peça acesso à API (Open API). A Shopee libera um App ID e um Secret.",
+    "Em Lojas → Shopee, cole o App ID e o Secret.",
+    "Marque Publicar esta loja e salve. Não use cookie: a Shopee recusa e nada é publicado."
+  ],
+  ali: [
+    "No AliExpress Portals (programa de afiliados), crie um app de API. Ele mostra App Key e App Secret.",
+    "No mesmo portal, copie o seu Tracking ID.",
+    "Em Lojas → AliExpress, cole App Key, Secret e Tracking ID, marque Publicar esta loja e salve."
+  ],
+  awin: [
+    "No painel da Awin, copie o seu Id do publisher e gere um token em API Credentials.",
+    "Em Lojas → Awin, cole o Id do publisher e o Token da API e salve.",
+    "Clube Samsung, Casas Bahia, Natura e Pague Menos usam essa mesma conta. Só aparecem ofertas dos programas em que você já foi aprovado."
+  ],
+  rakuten: [
+    "No painel da Rakuten Advertising, abra a área de desenvolvedor e copie Client ID e Client Secret.",
+    "Copie também o SID (o número do seu site na Rakuten).",
+    "Em Lojas → Rakuten, cole os três, marque Publicar esta loja e salve."
+  ],
+  shein: [
+    "Gere um link de afiliado da Shein (onelink.shein.com) e cole em Lojas → Shein.",
+    "Quando o card mudar para Conectada, a conta foi reconhecida.",
+    "A Shein não entrega lista de produtos: o robô não publica Shein sozinho."
+  ],
+  amazon: [
+    "Copie a sua Partner Tag do Amazon Associados (termina em -20) e cole em Lojas → Amazon. Pode colar um link com tag= que ela é extraída.",
+    "Cole os links dos produtos, um por linha (link | nome | preço). O robô coloca a sua tag e publica no ritmo da aba Envio.",
+    "Access Key e Secret são opcionais: a Amazon só libera a API depois de 10 vendas em 30 dias."
+  ],
+  epoca: [
+    "No painel da Lomadee, copie a sua chave da API (x-api-key).",
+    "Em Lojas → Época, cole a chave e salve. O robô busca o catálogo e publica com o seu link."
+  ]
+};
 
 const EXTRA_FORMS: Record<string, { hint: string; fields: Array<{ key: string; label: string; placeholder: string; secret?: boolean; locked?: boolean }> }> = {
   magalu: {
@@ -2116,8 +2176,11 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
                       <h3>{item[4]}</h3>
                       <ul><li>{item[5]}</li></ul>
                       <p>{item[6]}</p>
+                      {guide === item[0] && GUIDE_STEPS[item[0]] ? (
+                        <ol className="aff-steps">{GUIDE_STEPS[item[0]].map((step) => <li key={step}>{step}</li>)}</ol>
+                      ) : null}
                       <div className="aff-guide-card__actions">
-                        <button type="button" className="is-solid" onClick={() => setGuide(guide === item[0] ? "" : item[0])}>Abrir guia</button>
+                        <button type="button" className="is-solid" onClick={() => setGuide(guide === item[0] ? "" : item[0])}>{guide === item[0] ? "Fechar guia" : "Abrir guia"}</button>
                         <button type="button" onClick={() => setView("stores")}>Ver documentação</button>
                       </div>
                     </article>
