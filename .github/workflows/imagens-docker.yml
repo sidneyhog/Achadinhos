@@ -1,0 +1,87 @@
+# Gera as imagens usadas pelo stack do Portainer (portainer/achadinhos-stack.yml) e publica:
+#   no Docker Hub (padrão do stack), se os secrets DOCKERHUB_USERNAME e DOCKERHUB_TOKEN existirem no repositório:
+#     <DOCKERHUB_USERNAME>/achadinhos-api e -web, tags :latest e :<sha>
+#   e sempre no GitHub Container Registry: ghcr.io/<dono>/achadinhos-api e -web
+# Antes de publicar, roda a tipagem e os testes unitários da API e a tipagem e o build da web.
+name: Imagens Docker
+
+on:
+  push:
+    branches: [main, master, ccr-ba026902-6nzdj6]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: API — instalar, tipagem, testes unitários
+        working-directory: apps/api
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run test:unit
+      - name: Web — instalar, tipagem, build
+        working-directory: apps/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run build
+
+  publicar:
+    needs: verificar
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nome do registry em minúsculas
+        run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login no Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Lista de tags
+        run: |
+          {
+            echo "API_TAGS<<EOF"
+            echo "ghcr.io/${OWNER}/achadinhos-api:latest"
+            echo "ghcr.io/${OWNER}/achadinhos-api:${GITHUB_SHA}"
+            if [ -n "$DOCKERHUB_USERNAME" ]; then echo "${DOCKERHUB_USERNAME}/achadinhos-api:latest"; echo "${DOCKERHUB_USERNAME}/achadinhos-api:${GITHUB_SHA}"; fi
+            echo "EOF"
+            echo "WEB_TAGS<<EOF"
+            echo "ghcr.io/${OWNER}/achadinhos-web:latest"
+            echo "ghcr.io/${OWNER}/achadinhos-web:${GITHUB_SHA}"
+            if [ -n "$DOCKERHUB_USERNAME" ]; then echo "${DOCKERHUB_USERNAME}/achadinhos-web:latest"; echo "${DOCKERHUB_USERNAME}/achadinhos-web:${GITHUB_SHA}"; fi
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+      - name: Imagem da API
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          push: true
+          tags: ${{ env.API_TAGS }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - name: Imagem da web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: ${{ env.WEB_TAGS }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}

@@ -20,6 +20,24 @@ export const one = async <T = Record<string, unknown>>(text: string, params: unk
   return rows[0] ?? null;
 };
 
+/** Roda `fn` dentro de BEGIN/COMMIT no mesmo cliente; qualquer erro faz ROLLBACK. */
+export const withTransaction = async <T>(fn: (tx: { q: typeof q; one: typeof one }) => Promise<T>): Promise<T> => {
+  const client = await pool.connect();
+  const txq = async <R = Record<string, unknown>>(text: string, params: unknown[] = []) => (await client.query(text, params)).rows as R[];
+  const txone = async <R = Record<string, unknown>>(text: string, params: unknown[] = []) => (await txq<R>(text, params))[0] ?? null;
+  try {
+    await client.query("BEGIN");
+    const result = await fn({ q: txq, one: txone });
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 export const migrate = async () => {
   const schema = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "schema.sql"), "utf8");
   await pool.query(schema);
@@ -118,13 +136,19 @@ export const migrate = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
-  const email = process.env.ADMIN_EMAIL || "admin@achadinhos.local";
-  const password = process.env.ADMIN_PASSWORD || "admin123456";
+  const email = (process.env.ADMIN_EMAIL || "admin@achadinhos.local").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || "";
   const exists = await one("SELECT id FROM users WHERE email = $1", [email]);
   if (!exists) {
+    // Sem senha não cria o super admin: uma senha padrão conhecida num domínio público entrega o painel inteiro.
+    if (password.length < 8) {
+      console.error("O super admin não foi criado: defina ADMIN_PASSWORD (8 caracteres ou mais) e reinicie.");
+      return;
+    }
     const hash = await bcrypt.hash(password, 10);
+    // API e worker rodam migrate ao mesmo tempo; ON CONFLICT evita que um deles caia ao criar o mesmo usuário.
     await pool.query(
-      "INSERT INTO users (company_id, name, email, password_hash, role) VALUES (NULL, $1, $2, $3, 'superadmin')",
+      "INSERT INTO users (company_id, name, email, password_hash, role) VALUES (NULL, $1, $2, $3, 'superadmin') ON CONFLICT (email) DO NOTHING",
       ["Super Admin", email, hash]
     );
   }

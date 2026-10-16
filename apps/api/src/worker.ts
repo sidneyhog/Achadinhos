@@ -4,6 +4,11 @@ import { runDueDeals } from "./engine/runDeals";
 import { tickAudience } from "./engine/audience";
 import { phoneFromParticipant } from "./deals/audiencePolicy";
 import { getRedis } from "./redis";
+import { withLock } from "./locks";
+import { assertAppSecret, loadAutoSecrets } from "./secrets";
+
+loadAutoSecrets("worker");
+assertAppSecret("worker");
 import { WA_REQ } from "./zapo/bridge";
 import { getLive, liveIds, startSession, stopSession, type LiveSession } from "./zapo/session";
 
@@ -200,15 +205,22 @@ const suspendExpired = async () => {
   for (const row of rows) await audit(row.id, null, "suspend", `Teste de ${row.name} venceu e a empresa foi suspensa`);
 };
 
+// setInterval não espera a rodada anterior terminar. Uma rodada com pausas entre envios passa de 30 s,
+// e duas rodadas ao mesmo tempo publicavam a mesma oferta duas vezes no mesmo grupo.
+let ticking = false;
 const tick = async () => {
+  if (ticking) return;
+  ticking = true;
   try {
     await suspendExpired();
     await remindDue();
     const sent = await runDueDeals();
-    const moved = await tickAudience();
+    const moved = (await withLock("audience", 600, tickAudience)) ?? 0;
     if (sent || moved) console.log(`[worker] ofertas=${sent} contatos=${moved}`);
   } catch (err) {
     console.error("[worker]", err);
+  } finally {
+    ticking = false;
   }
 };
 

@@ -3,3 +3,5 @@ dist
 .env
 .zapo-auth
 *.sqlite
+certificados
+*.pfx

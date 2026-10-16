@@ -49,6 +49,14 @@ export const saveContacts = async (
   return { ...prepared, created };
 };
 
+/** Converte a linha de audience_jobs para o formato que clampJobPace espera. */
+export const jobPaceOf = (job: { interval_seconds?: unknown; per_hour?: unknown; per_day?: unknown; batch_size?: unknown }) => ({
+  intervalSeconds: Number(job.interval_seconds),
+  perHour: Number(job.per_hour),
+  perDay: Number(job.per_day),
+  batchSize: Number(job.batch_size)
+});
+
 const adminOf = (
   meta: { owner?: string; participants?: Array<{ jid?: string; id?: string; isAdmin?: boolean; isSuperAdmin?: boolean; phoneNumber?: string; lid?: string }> },
   me: string
@@ -82,7 +90,8 @@ export const tickAudience = async () => {
   let handled = 0;
   const now = new Date();
   for (const job of jobs) {
-    const pace = clampJobPace(job);
+    // As colunas vêm em snake_case; sem este mapeamento o ritmo salvo na fila era ignorado e valia sempre o padrão.
+    const pace = clampJobPace(jobPaceOf(job));
     const perWeek = Math.min(2000, Math.max(1, Number(job.per_week) || 400));
     if (!jobIsDue(job.last_tick_at ? new Date(job.last_tick_at) : null, pace.intervalSeconds, now)) continue;
     await q("UPDATE audience_jobs SET last_tick_at = now() WHERE id = $1", [job.id]);

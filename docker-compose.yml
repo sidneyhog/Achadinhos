@@ -33,6 +33,8 @@ services:
         condition: service_started
     volumes:
       - zapodata:/data/zapo
+      # Certificado .pfx da EFI. No .env use EFI_CERT_PATH=/certificados/efi.pfx (caminho de dentro do container).
+      - ./certificados:/certificados:ro
 
   worker:
     build: ./apps/api

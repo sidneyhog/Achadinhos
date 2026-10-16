@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import crypto from "node:crypto";
 import * as XLSX from "xlsx";
-import { audit, one, q } from "./db";
+import { audit, one, q, withTransaction } from "./db";
 import { decrypt, encrypt } from "./secrets";
 import { createBoleto, createCard, createPix, efiConfigured, testEfiConnection } from "./efi";
 import { loadEfiRuntime, loadPlatform } from "./platform";
@@ -26,11 +26,17 @@ export type AuthUser = {
   email: string;
 };
 
-const secret = () => process.env.JWT_SECRET || "achadinhos-dev-jwt";
+/** Sem JWT_SECRET não há fallback: um valor fixo no código permitiria forjar login de qualquer usuário. */
+const secret = () => {
+  const value = process.env.JWT_SECRET || "";
+  if (!value) throw Object.assign(new Error("JWT_SECRET não configurado"), { status: 500 });
+  return value;
+};
+const JWT_ALGORITHMS: jwt.Algorithm[] = ["HS256"];
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 const sign = (user: AuthUser) =>
-  jwt.sign({ uid: user.id, companyId: user.companyId, role: user.role }, secret(), { expiresIn: "7d" });
+  jwt.sign({ uid: user.id, companyId: user.companyId, role: user.role }, secret(), { expiresIn: "7d", algorithm: "HS256" });
 
 const loadUser = async (id: number): Promise<(AuthUser & { tenantId: string | null; companyStatus: string | null }) | null> => {
   const row = await one<{
@@ -63,7 +69,7 @@ const auth = async (req: Request, res: Response, next: NextFunction) => {
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (!token) return res.status(401).json({ error: "Faça login" });
   try {
-    const payload = jwt.verify(token, secret()) as { uid: number };
+    const payload = jwt.verify(token, secret(), { algorithms: JWT_ALGORITHMS }) as { uid: number };
     const user = await loadUser(payload.uid);
     if (!user) return res.status(401).json({ error: "Sessão inválida" });
     if (user.companyStatus === "blocked") return res.status(403).json({ error: "Empresa bloqueada" });
@@ -83,7 +89,38 @@ const admin = (req: Request, res: Response, next: NextFunction) => {
   return next();
 };
 
-const ipOf = (req: Request) => String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+/**
+ * O Nginx do container grava X-Real-IP depois de resolver X-Forwarded-For só a partir de proxies internos
+ * (nginx/default.conf). O primeiro item de X-Forwarded-For vem do cliente e não serve para auditoria nem limite.
+ * A porta 4000 da API não é publicada no Compose; fora dele, coloque um proxy na frente que sobrescreva X-Real-IP.
+ */
+const ipOf = (req: Request) => String(req.headers["x-real-ip"] || req.socket.remoteAddress || "").split(",")[0].trim();
+
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
+const validEmail = (email: string) => email.length <= 254 && EMAIL_RE.test(email);
+
+/** Janela deslizante simples em memória. A API roda em um processo só (docker-compose.yml). */
+const hits = new Map<string, number[]>();
+const limited = (key: string, max: number, windowMs: number) => {
+  const now = Date.now();
+  const recent = (hits.get(key) || []).filter(at => now - at < windowMs);
+  hits.set(key, recent);
+  return recent.length >= max;
+};
+const hit = (key: string) => {
+  const list = hits.get(key) || [];
+  list.push(Date.now());
+  hits.set(key, list);
+};
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, list] of hits) if (!list.some(at => now - at < 60 * 60 * 1000)) hits.delete(key);
+}, 10 * 60 * 1000).unref();
+const LOGIN_FAILS_PER_ACCOUNT = 10;
+const LOGIN_FAILS_PER_IP = 50;
+const REGISTER_PER_IP = 30;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 
 const companyIdOf = (req: Request) => {
   const user = (req as Request & { auth: { companyId: number | null } }).auth;
@@ -143,14 +180,17 @@ const secretsOf = (packed: string) => {
   }
 };
 
-const publicStore = (row: { marketplace: string; enabled: boolean; public_config: Record<string, string>; secrets_enc: string }) => {
+/** Conta "leitura" (member) não altera lojas, então não recebe o valor das credenciais, só quais existem. */
+const canSeeSecrets = (req: Request) => (req as Request & { auth: { role: string } }).auth.role !== "member";
+
+const publicStore = (row: { marketplace: string; enabled: boolean; public_config: Record<string, string>; secrets_enc: string }, reveal = true) => {
   const secrets = secretsOf(row.secrets_enc);
   return {
     marketplace: row.marketplace,
     label: marketplaceLabel(row.marketplace),
     enabled: row.enabled,
     config: row.public_config || {},
-    secrets,
+    secrets: reveal ? secrets : {},
     hasSecrets: Object.keys(secrets).length > 0,
     secretKeys: Object.keys(secrets),
     publishes: !["magalu", "shein", "terabyte"].includes(row.marketplace)
@@ -158,6 +198,32 @@ const publicStore = (row: { marketplace: string; enabled: boolean; public_config
 };
 
 export const app = express();
+
+/**
+ * Express 4 não trata promessas rejeitadas: o erro vira unhandledRejection e o Node 22 encerra o processo.
+ * Um único GET /vitrine/<texto> derrubava a API. Aqui toda rota registrada encaminha a rejeição para o
+ * tratador de erro do fim do arquivo, sem mudar a assinatura de nenhuma rota.
+ */
+type Handler = (req: Request, res: Response, next: NextFunction) => unknown;
+const forwardRejections = (handler: unknown) => {
+  if (typeof handler !== "function" || handler.length >= 4) return handler;
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = (handler as Handler)(req, res, next);
+      if (result && typeof (result as Promise<unknown>).then === "function") (result as Promise<unknown>).catch(next);
+      return result;
+    } catch (err) {
+      return next(err);
+    }
+  };
+};
+for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+  const original = app[method].bind(app) as (...args: unknown[]) => unknown;
+  (app as unknown as Record<string, unknown>)[method] = (...args: unknown[]) =>
+    args.length <= 1 ? original(...args) : original(args[0], ...args.slice(1).map(forwardRejections));
+}
+
+app.disable("x-powered-by");
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
@@ -183,43 +249,63 @@ app.post("/api/auth/register", async (req, res, next) => {
     const city = String(req.body?.city || "").trim().slice(0, 80);
     const state = String(req.body?.state || "").trim().toUpperCase();
     const planSlug = String(req.body?.planSlug || "starter");
+    const ipKey = `register:${ipOf(req)}`;
+    if (limited(ipKey, REGISTER_PER_IP, REGISTER_WINDOW_MS)) {
+      return res.status(429).json({ error: "Muitos cadastros a partir deste endereço. Tente de novo mais tarde." });
+    }
+    hit(ipKey);
     if (!name || !email || password.length < 6 || !companyName || !city || !/^[A-Z]{2}$/.test(state)) {
       return res.status(400).json({ error: "Informe nome, empresa, cidade, estado, e-mail e senha com 6 caracteres" });
+    }
+    if (!validEmail(email) || name.length > 120 || companyName.length > 120 || password.length > 200) {
+      return res.status(400).json({ error: "Confira o e-mail e o tamanho dos campos" });
     }
     const plan = await one<{ id: number; trial_days: number }>("SELECT id, trial_days FROM plans WHERE slug = $1 AND active = true", [planSlug]);
     if (!plan) return res.status(400).json({ error: "Plano inválido" });
     const hash = await bcrypt.hash(password, 10);
-    const company = await one<{ id: number; tenant_id: string }>(
-      "INSERT INTO companies (name, city, state) VALUES ($1,$2,$3) RETURNING id, tenant_id",
-      [companyName, city, state]
-    );
-    if (!company) throw new Error("Falha ao criar empresa");
-    const user = await one<{ id: number }>(
-      "INSERT INTO users (company_id, name, email, password_hash, role, phone) VALUES ($1,$2,$3,$4,'owner',$5) RETURNING id",
-      [company.id, name, email, hash, phone]
-    );
-    await q(
-      "INSERT INTO subscriptions (company_id, plan_id, status, trial_ends_at) VALUES ($1,$2,'trialing', now() + ($3 || ' days')::interval)",
-      [company.id, plan.id, String(plan.trial_days)]
-    );
-    await q("INSERT INTO settings (company_id) VALUES ($1)", [company.id]);
+    // Empresa, dono, assinatura e configurações nascem juntos. Antes, um e-mail repetido deixava a empresa órfã no banco.
+    const { company, user } = await withTransaction(async tx => {
+      const company = await tx.one<{ id: number; tenant_id: string }>(
+        "INSERT INTO companies (name, city, state) VALUES ($1,$2,$3) RETURNING id, tenant_id",
+        [companyName, city, state]
+      );
+      if (!company) throw new Error("Falha ao criar empresa");
+      const user = await tx.one<{ id: number }>(
+        "INSERT INTO users (company_id, name, email, password_hash, role, phone) VALUES ($1,$2,$3,$4,'owner',$5) RETURNING id",
+        [company.id, name, email, hash, phone]
+      );
+      await tx.q(
+        "INSERT INTO subscriptions (company_id, plan_id, status, trial_ends_at) VALUES ($1,$2,'trialing', now() + ($3 || ' days')::interval)",
+        [company.id, plan.id, String(plan.trial_days)]
+      );
+      await tx.q("INSERT INTO settings (company_id) VALUES ($1)", [company.id]);
+      return { company, user };
+    });
     await audit(company.id, user!.id, "register", `Conta criada no plano ${planSlug}`, ipOf(req));
     const full = await loadUser(user!.id);
     res.status(201).json({ token: sign(full!), user: full });
   } catch (err) {
-    const message = String((err as { code?: string; message?: string }).message || err);
     if ((err as { code?: string }).code === "23505") return res.status(409).json({ error: "Este e-mail já tem conta" });
     next(err);
   }
 });
 
 app.post("/api/auth/login", async (req, res) => {
-  const email = String(req.body?.email || "").trim().toLowerCase();
-  const password = String(req.body?.password || "");
+  const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 254);
+  const password = String(req.body?.password || "").slice(0, 200);
+  const ip = ipOf(req);
+  const accountKey = `login:${ip}:${email}`;
+  const ipKey = `login:${ip}`;
+  if (limited(accountKey, LOGIN_FAILS_PER_ACCOUNT, LOGIN_WINDOW_MS) || limited(ipKey, LOGIN_FAILS_PER_IP, LOGIN_WINDOW_MS)) {
+    return res.status(429).json({ error: "Muitas tentativas. Espere alguns minutos e tente de novo." });
+  }
   const row = await one<{ id: number; password_hash: string }>("SELECT id, password_hash FROM users WHERE email = $1", [email]);
   if (!row || !(await bcrypt.compare(password, row.password_hash))) {
+    hit(accountKey);
+    hit(ipKey);
     return res.status(401).json({ error: "E-mail ou senha incorretos" });
   }
+  hits.delete(accountKey);
   const user = await loadUser(row.id);
   if (!user) return res.status(401).json({ error: "Conta inválida" });
   if (user.companyStatus === "blocked") return res.status(403).json({ error: "Empresa bloqueada" });
@@ -270,6 +356,7 @@ app.post("/api/admin/companies", auth, admin, async (req, res) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
   if (!name) return res.status(400).json({ error: "Informe o nome" });
+  if (email && !validEmail(email)) return res.status(400).json({ error: "E-mail inválido" });
   if ((email || password || ownerName) && (!ownerName || !email || password.length < 6)) {
     return res.status(400).json({ error: "Para criar o acesso, informe nome, e-mail e senha com 6 caracteres" });
   }
@@ -626,7 +713,7 @@ app.patch("/api/admin/profile", auth, admin, async (req, res) => {
   const name = String(req.body?.name || "").trim();
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
-  if (!name || !email.includes("@")) return res.status(400).json({ error: "Informe nome e e-mail" });
+  if (!name || !validEmail(email)) return res.status(400).json({ error: "Informe nome e e-mail" });
   if (password && password.length < 6) return res.status(400).json({ error: "A senha precisa ter 6 caracteres" });
   const taken = await one<{ id: number }>("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, user.id]);
   if (taken) return res.status(409).json({ error: "Este e-mail já tem conta" });
@@ -681,7 +768,7 @@ app.get("/api/settings", auth, async (req, res, next) => {
     const cookie = decrypt(String((setting as { ml_cookie_enc?: string })?.ml_cookie_enc || ""));
     res.json({
       setting: setting
-        ? { ...setting, ml_cookie_enc: undefined, mlCookie: cookie, mlCookieSet: Boolean(cookie), mlCookieExpiresAt: cookie ? mercadoLivreCookieExpiry(cookie) : (setting as { ml_cookie_expires_at?: string }).ml_cookie_expires_at }
+        ? { ...setting, ml_cookie_enc: undefined, mlCookie: canSeeSecrets(req) ? cookie : "", mlCookieSet: Boolean(cookie), mlCookieExpiresAt: cookie ? mercadoLivreCookieExpiry(cookie) : (setting as { ml_cookie_expires_at?: string }).ml_cookie_expires_at }
         : null
     });
   } catch (err) {
@@ -743,7 +830,7 @@ app.get("/api/stores", auth, async (req, res, next) => {
     );
     const byId = new Map(rows.map(row => [row.marketplace, row]));
     res.json({
-      stores: STORES.map(id => publicStore(byId.get(id) || { marketplace: id, enabled: false, public_config: {}, secrets_enc: "" }))
+      stores: STORES.map(id => publicStore(byId.get(id) || { marketplace: id, enabled: false, public_config: {}, secrets_enc: "" }, canSeeSecrets(req)))
     });
   } catch (err) {
     next(err);
@@ -1073,6 +1160,9 @@ app.post("/api/groups", auth, async (req, res, next) => {
     const jid = String(req.body?.groupJid || "").trim();
     if (!jid.endsWith("@g.us")) return res.status(400).json({ error: "Grupo inválido" });
     const whatsappId = Number(req.body?.whatsappId) || null;
+    if (whatsappId && !(await one("SELECT id FROM whatsapp_sessions WHERE id = $1 AND company_id = $2", [whatsappId, companyId]))) {
+      return res.status(404).json({ error: "Conexão não encontrada" });
+    }
     const exists = await one(
       "SELECT id FROM groups WHERE company_id = $1 AND group_jid = $2 AND whatsapp_id IS NOT DISTINCT FROM $3",
       [companyId, jid, whatsappId]
@@ -1302,17 +1392,25 @@ app.get("/api/contacts/export", auth, async (req, res, next) => {
       return res.send(body);
     }
     if (format === "vcf") {
-      const body = rows.map(row => `BEGIN:VCARD\nVERSION:3.0\nFN:${row.name}\nTEL:${row.phone}\nEND:VCARD`).join("\n");
+      const line = (value: string) => String(value || "").replace(/[\r\n]+/g, " ");
+      const body = rows.map(row => `BEGIN:VCARD\nVERSION:3.0\nFN:${line(row.name)}\nTEL:${line(row.phone)}\nEND:VCARD`).join("\n");
       res.setHeader("Content-Type", "text/vcard");
       return res.send(body);
     }
-    const lines = ["nome,telefone,tags", ...rows.map(row => `${row.name},${row.phone},"${(row.tags || []).join(" ")}"`)];
+    // Nomes vêm de participantes de grupo (texto de terceiros). Sem escape, "=HYPERLINK(...)" vira fórmula no Excel.
+    const lines = ["nome,telefone,tags", ...rows.map(row => [row.name, row.phone, (row.tags || []).join(" ")].map(value => csvCell(String(value ?? ""))).join(","))];
     res.setHeader("Content-Type", "text/plain");
     res.send(format === "txt" ? rows.map(row => row.phone).join("\n") : lines.join("\n"));
   } catch (err) {
     next(err);
   }
 });
+
+/** Célula CSV entre aspas e sem início de fórmula (=, +, -, @, tab, CR). */
+const csvCell = (value: string) => {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
 
 const audienceCounts = `
   (SELECT count(*)::int FROM audience_items i WHERE i.job_id = j.id) AS total,
@@ -1446,10 +1544,7 @@ app.get("/api/audience/jobs/:id/export", auth, async (req, res, next) => {
        ORDER BY i.id ASC`,
       [companyId, id]
     );
-    const cell = (value: string) => {
-      const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
-      return `"${safe.replace(/"/g, '""')}"`;
-    };
+    const cell = csvCell;
     const resultOf = (status: string, reason: string) => status === "pending" ? "Na fila" : status === "added" && reason === "convite enviado" ? "Convite" : status === "added" ? "Adicionado" : reason === "já está no grupo" ? "Já estava" : status === "failed" ? "Falhou" : reason || status;
     const lines = ["nome,telefone,resultado,motivo,horario", ...rows.map(row => [row.name, row.phone, resultOf(row.status, row.reason || ""), row.reason || "", row.processed_at ? new Date(row.processed_at).toISOString() : ""].map(value => cell(String(value))).join(","))];
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -1494,6 +1589,7 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
       return res.json({ configured: false, message: "EFI ainda não está configurado. O teste grátis segue ativo." });
     }
     const method = String(req.body?.method || "pix");
+    if (!["pix", "card", "boleto"].includes(method)) return res.status(400).json({ error: "Método inválido" });
     const cycle = ["monthly", "quarterly", "semiannual", "yearly"].includes(String(req.body?.cycle)) ? String(req.body.cycle) : "monthly";
     const sub = await one<{ plan_id: number; slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; name: string }>(
       "SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1",
@@ -1511,9 +1607,10 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
       );
       if (!coupon) return res.status(400).json({ error: "Cupom inválido ou vencido" });
       if (coupon.plan_slug && coupon.plan_slug !== sub.slug) return res.status(400).json({ error: "Este cupom não vale para o plano atual" });
-      if (coupon.max_uses != null && coupon.used_count >= coupon.max_uses) return res.status(400).json({ error: "Este cupom esgotou" });
+      // Reserva o uso numa única instrução: duas compras simultâneas não passam do limite do cupom.
+      const reserved = await one("UPDATE coupons SET used_count = used_count + 1 WHERE id = $1 AND (max_uses IS NULL OR used_count < max_uses) RETURNING id", [coupon.id]);
+      if (!reserved) return res.status(400).json({ error: "Este cupom esgotou" });
       amount = coupon.kind === "amount" ? Math.max(0, amount - Number(coupon.amount_cents || 0)) : Math.max(0, Math.round(amount * (100 - Number(coupon.percent || 0)) / 100));
-      await q("UPDATE coupons SET used_count = used_count + 1 WHERE id = $1", [coupon.id]);
     }
     const txid = crypto.randomBytes(16).toString("hex").slice(0, 26);
     const invoice = await one<{ id: number }>(
@@ -1546,25 +1643,66 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
   }
 });
 
-app.post("/api/billing/webhook", async (req, res) => {
-  const txid = String(req.body?.txid || req.body?.pix?.[0]?.txid || "");
-  if (!txid) return res.json({ ok: true });
-  const invoice = await one<{ id: number; company_id: number; cycle: string; status: string }>(
-    "SELECT id, company_id, cycle, status FROM invoices WHERE external_id = $1",
-    [txid]
-  );
-  if (!invoice || invoice.status === "paid") return res.json({ ok: true });
-  const days = invoice.cycle === "yearly" ? 365 : invoice.cycle === "semiannual" ? 180 : invoice.cycle === "quarterly" ? 90 : 30;
-  await q("UPDATE invoices SET status = 'paid', paid_at = now() WHERE id = $1", [invoice.id]);
-  await q(
-    "UPDATE subscriptions SET status = 'active', current_period_end = now() + ($2 || ' days')::interval, updated_at = now() WHERE company_id = $1",
-    [invoice.company_id, String(days)]
-  );
-  await q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [invoice.company_id]);
-  await q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'paid',$3::jsonb)", [invoice.company_id, invoice.id, JSON.stringify(req.body || {})]);
-  await audit(invoice.company_id, null, "payment", "Pagamento confirmado");
+/**
+ * Webhook Pix da EFI.
+ * Antes não havia autenticação: qualquer cliente pegava o txid devolvido no próprio checkout, chamava esta rota
+ * e ativava a assinatura (até 365 dias) sem pagar.
+ *
+ * Agora:
+ * - exige EFI_WEBHOOK_SECRET, comparado com ?hmac= (forma que a EFI documenta para webhook sem mTLS). Sem a variável, recusa;
+ * - confere o valor pago contra o valor da fatura;
+ * - marca a fatura como paga numa transação condicional (status <> 'paid'), então reenvio do mesmo evento não repete efeitos;
+ * - aceita /api/billing/webhook/pix, porque a EFI acrescenta /pix à URL cadastrada.
+ * Cadastre na EFI: https://SEU-DOMINIO/api/billing/webhook?hmac=SEGREDO&ignorar=
+ */
+const webhookAllowed = (req: Request) => {
+  const expected = process.env.EFI_WEBHOOK_SECRET || "";
+  if (!expected) return false;
+  const given = Buffer.from(String(req.query.hmac || req.header("x-webhook-secret") || ""));
+  const wanted = Buffer.from(expected);
+  return given.length === wanted.length && crypto.timingSafeEqual(given, wanted);
+};
+
+const billingWebhook = async (req: Request, res: Response) => {
+  if (!webhookAllowed(req)) {
+    const configured = Boolean(process.env.EFI_WEBHOOK_SECRET);
+    if (!configured) console.error("[billing] webhook recusado: EFI_WEBHOOK_SECRET não configurado");
+    return res.status(configured ? 401 : 503).json({ error: configured ? "Não autorizado" : "Webhook não configurado" });
+  }
+  const items: Array<{ txid?: unknown; valor?: unknown }> = Array.isArray(req.body?.pix) ? req.body.pix : req.body?.txid ? [req.body] : [];
+  for (const item of items.slice(0, 50)) {
+    const txid = String(item?.txid || "");
+    if (!txid) continue;
+    const invoice = await one<{ id: number; company_id: number; cycle: string; status: string; amount_cents: number }>(
+      "SELECT id, company_id, cycle, status, amount_cents FROM invoices WHERE external_id = $1",
+      [txid]
+    );
+    if (!invoice || invoice.status === "paid") continue;
+    const paidCents = Math.round(Number(String(item.valor ?? "").replace(",", ".")) * 100);
+    if (!Number.isFinite(paidCents) || paidCents !== Number(invoice.amount_cents)) {
+      await q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'amount_mismatch',$3::jsonb)", [invoice.company_id, invoice.id, JSON.stringify(item)]);
+      await audit(invoice.company_id, null, "payment", `Pagamento recusado: valor ${String(item.valor ?? "")} diferente da fatura ${invoice.id}`);
+      continue;
+    }
+    const days = invoice.cycle === "yearly" ? 365 : invoice.cycle === "semiannual" ? 180 : invoice.cycle === "quarterly" ? 90 : 30;
+    const applied = await withTransaction(async tx => {
+      const updated = await tx.one("UPDATE invoices SET status = 'paid', paid_at = now() WHERE id = $1 AND status <> 'paid' RETURNING id", [invoice.id]);
+      if (!updated) return false;
+      await tx.q(
+        "UPDATE subscriptions SET status = 'active', current_period_end = now() + ($2 || ' days')::interval, updated_at = now() WHERE company_id = $1",
+        [invoice.company_id, String(days)]
+      );
+      await tx.q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [invoice.company_id]);
+      await tx.q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'paid',$3::jsonb)", [invoice.company_id, invoice.id, JSON.stringify(item)]);
+      return true;
+    });
+    if (applied) await audit(invoice.company_id, null, "payment", "Pagamento confirmado");
+  }
   res.json({ ok: true });
-});
+};
+
+app.post("/api/billing/webhook", billingWebhook);
+app.post("/api/billing/webhook/pix", billingWebhook);
 
 app.get("/api/audit", auth, async (req, res, next) => {
   try {
@@ -1581,7 +1719,10 @@ app.get("/api/audit", auth, async (req, res, next) => {
 const escapeHtml = (value: unknown) =>
   String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 app.get("/vitrine/:tenantId", async (req, res) => {
+  if (!UUID_RE.test(String(req.params.tenantId))) return res.status(404).type("html").send("<p>Vitrine indisponível.</p>");
   const company = await one<{ id: number; name: string }>(
     "SELECT c.id, c.name FROM companies c JOIN settings s ON s.company_id = c.id WHERE c.tenant_id = $1 AND s.enabled = true",
     [req.params.tenantId]
@@ -1636,6 +1777,7 @@ app.post("/api/team", auth, async (req, res, next) => {
     const password = String(req.body?.password || "");
     const role = req.body?.role === "manager" ? "manager" : "member";
     if (!name || !email || password.length < 6) return res.status(400).json({ error: "Informe nome, e-mail e senha com 6 caracteres" });
+    if (!validEmail(email)) return res.status(400).json({ error: "E-mail inválido" });
     const hash = await bcrypt.hash(password, 10);
     const user = await one(
       "INSERT INTO users (company_id, name, email, password_hash, role, phone) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, email, role",
@@ -1745,10 +1887,15 @@ app.post("/api/admin/smtp/test", auth, admin, async (req, res) => {
   }
 });
 
-app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
-  const status = err.status || 500;
-  if (status >= 500) console.error(err);
-  res.status(status).json({ error: err.message || "Erro interno" });
+app.use((err: Error & { status?: number; code?: string; isAxiosError?: boolean }, req: Request, res: Response, _next: NextFunction) => {
+  // 22P02/22003: parâmetro que não converte para o tipo da coluna (ex.: /api/team/abc). É erro do pedido, não do servidor.
+  if (err.code === "22P02" || err.code === "22003") return res.status(400).json({ error: "Parâmetro inválido" });
+  // AxiosError traz o status da resposta do serviço externo (ex.: 401 da EFI); repassá-lo faria o painel tratar como sessão inválida.
+  const status = err.isAxiosError ? 502 : err.status || 500;
+  if (status >= 500) console.error(`[api] ${req.method} ${req.path}`, err.isAxiosError ? err.message : err);
+  // Mensagens de 5xx podem trazer detalhes do banco ou de serviços externos; o detalhe fica no log.
+  const message = err.isAxiosError ? "O serviço externo não respondeu. Tente de novo." : status >= 500 && !err.status ? "Erro interno" : err.message || "Erro interno";
+  res.status(status).json({ error: message });
 });
 
 export { tickAudience };

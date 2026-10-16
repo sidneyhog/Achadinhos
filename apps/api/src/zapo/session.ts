@@ -97,7 +97,7 @@ export const startSession = async (row: { id: number; company_id: number; name: 
       },
       logger
     );
-    const session = { client } as LiveSession;
+    const session = { client } as unknown as LiveSession;
     client.on("auth_qr", async (event: { qr?: string }) => {
       if (!event?.qr) return;
       const qrcode = await import("qrcode");

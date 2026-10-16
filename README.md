@@ -34,6 +34,8 @@ sudo bash instalador/instalar.sh
 
 O Nginx entrega o site e encaminha `/api/`, `/vitrine/` e `/go/` para a API. O schema é aplicado na subida da API (`CREATE TABLE IF NOT EXISTS`). Colunas novas precisam de `ALTER` explícito.
 
+Para rodar no **Portainer** (stack atrás de um Traefik que já atende outros projetos), use [portainer/achadinhos-stack.yml](portainer/achadinhos-stack.yml) e o passo a passo em [portainer/LEIAME.md](portainer/LEIAME.md).
+
 ## Login
 
 Na página inicial, **Entrar** abre `/login`. **Criar conta** abre `/cadastro`. O painel do cliente usa um endereço por tela: `/home`, `/lojas`, `/campanhas`, `/ofertas`, `/publicacoes`, `/conexoes`, `/contatos`, `/links`, `/analytics`, `/automacao`, `/material` e `/configuracoes/envio` (também `geral`, `filtros`, `horarios`, `equipe` e `logs`). A conexão aberta fica em `/conexoes/1/grupos`. O super admin usa `/admin`, `/admin/empresas`, `/admin/planos`, `/admin/configuracoes` e `/admin/perfil`. O voltar do navegador troca de tela.
@@ -52,7 +54,7 @@ Na primeira subida, se o e-mail ainda não existir, o sistema cria o super admin
 | Campo | Padrão local |
 | --- | --- |
 | E-mail | `admin@achadinhos.local` |
-| Senha | `admin123456` |
+| Senha | `ADMIN_PASSWORD` do `.env` (obrigatória, 8 caracteres ou mais; sem ela o super admin não é criado) |
 | Nome | Super Admin |
 | Papel | `superadmin` |
 
@@ -111,12 +113,13 @@ O arquivo `.env` é lido pela API e pelo worker. O Compose substitui banco e Red
 
 | Variável | Uso |
 | --- | --- |
-| `JWT_SECRET` | Assinatura do login. Troque fora do ambiente local. |
+| `JWT_SECRET` | Assinatura do login. Obrigatória: sem ela a API não sobe. |
 | `APP_SECRET` | Criptografia das credenciais de loja e dos tokens. Troque fora do ambiente local. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Super admin criado só se o e-mail ainda não existir. |
 | `DATABASE_URL` | Postgres. No Compose aponta para o serviço `postgres`. |
 | `REDIS_URL` | Redis. No Compose aponta para o serviço `redis`. |
 | `EFI_CLIENT_ID`, `EFI_CLIENT_SECRET`, `EFI_PIX_KEY`, `EFI_CERT_PATH`, `EFI_CERT_PASSWORD` | Cobrança EFI (PIX, cartão e boleto). Vazias, o checkout avisa que a EFI não está configurada. |
 | `EFI_SANDBOX` | `true` usa o ambiente de teste da EFI. |
+| `EFI_WEBHOOK_SECRET` | Segredo do webhook de pagamento. Sem ele a API recusa as confirmações da EFI. Cadastre na EFI `https://seu-dominio/api/billing/webhook?hmac=<segredo>&ignorar=`. O instalador gera o valor. |
 
 Banco local do Compose: usuário `achadinhos`, senha `achadinhos`, database `achadinhos`.

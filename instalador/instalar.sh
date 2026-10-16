@@ -148,12 +148,31 @@ if [[ ! "$APP_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
   exit 1
 fi
 
-DEFAULT_DIR="/home/${APP_USER}"
-INSTALL_DIR="$(ask "Pasta da instalação (Enter usa /home/${APP_USER})" "$DEFAULT_DIR")"
+# Pasta própria por padrão: a cópia usa rsync --delete, que apaga da pasta de destino tudo o que não veio do projeto.
+# Instalar direto na home (/home/deploy) apagava .ssh, .bashrc e qualquer outro projeto guardado ali.
+DEFAULT_DIR="/home/${APP_USER}/achadinhos"
+INSTALL_DIR="$(ask "Pasta da instalação (Enter usa ${DEFAULT_DIR})" "$DEFAULT_DIR")"
 INSTALL_DIR="${INSTALL_DIR%/}"
 if [[ "$INSTALL_DIR" != /* ]]; then
-  echo "A pasta precisa ser um caminho absoluto, por exemplo /home/deploy." >&2
+  echo "A pasta precisa ser um caminho absoluto, por exemplo ${DEFAULT_DIR}." >&2
   exit 1
+fi
+case "$INSTALL_DIR" in
+  ""|/|/home|/root|/opt|/srv|/var|/etc|/usr)
+    echo "Escolha uma pasta só do Achadinhos, por exemplo ${DEFAULT_DIR}." >&2
+    exit 1
+    ;;
+esac
+# Pasta que já tem arquivos e não é uma instalação anterior do Achadinhos: recusa, para não apagar outro projeto.
+if [[ -d "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" && ! -f "$INSTALL_DIR/.instalador.env" && "$(realpath "$INSTALL_DIR")" != "$(realpath "$SOURCE")" ]]; then
+  echo "A pasta ${INSTALL_DIR} já tem arquivos e não é uma instalação do Achadinhos. Escolha uma pasta vazia ou nova." >&2
+  exit 1
+fi
+# Instalações antigas ficaram na própria home do usuário. Nelas a cópia continua, mas sem apagar nada.
+SYNC_DELETE="--delete"
+if [[ "$INSTALL_DIR" == "/home/${APP_USER}" || "$INSTALL_DIR" =~ ^/home/[^/]+$ ]]; then
+  SYNC_DELETE=""
+  echo "Aviso: ${INSTALL_DIR} é uma pasta home. A cópia não vai apagar arquivos antigos dela. Para as próximas, prefira ${DEFAULT_DIR}."
 fi
 
 DOMAIN=""
@@ -177,12 +196,12 @@ if [[ -f "$INSTALL_DIR/.env" ]]; then
 else
   ADMIN_EMAIL="$(ask "E-mail do super admin" "$LE_EMAIL")"
   while true; do
-    read -r -s -p "Senha do super admin (mínimo 6 caracteres): " ADMIN_PASSWORD
+    read -r -s -p "Senha do super admin (mínimo 8 caracteres): " ADMIN_PASSWORD
     echo
-    if ((${#ADMIN_PASSWORD} >= 6)); then
+    if ((${#ADMIN_PASSWORD} >= 8)); then
       break
     fi
-    echo "A senha precisa ter pelo menos 6 caracteres." >&2
+    echo "A senha precisa ter pelo menos 8 caracteres." >&2
   done
 fi
 
@@ -254,13 +273,14 @@ usermod -aG docker "$APP_USER" || true
 
 mkdir -p "$INSTALL_DIR" /var/www/certbot
 if [[ "$(realpath "$SOURCE")" != "$(realpath "$INSTALL_DIR")" ]]; then
-  rsync -a --delete \
+  rsync -a ${SYNC_DELETE} \
     --exclude node_modules \
     --exclude dist \
     --exclude .git \
     --exclude .env \
     --exclude .zapo-auth \
     --exclude .instalador.env \
+    --exclude certificados \
     "$SOURCE"/ "$INSTALL_DIR"/
 fi
 
@@ -268,6 +288,7 @@ if [[ "$KEEP_ENV" == "0" ]]; then
   JWT_SECRET="$(openssl rand -hex 32)"
   APP_SECRET="$(openssl rand -hex 32)"
   POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+  EFI_WEBHOOK_SECRET="$(openssl rand -hex 24)"
   umask 077
   cat > "$INSTALL_DIR/.env" <<EOF
 JWT_SECRET=${JWT_SECRET}
@@ -283,9 +304,16 @@ EFI_PIX_KEY=
 EFI_CERT_PATH=
 EFI_CERT_PASSWORD=
 EFI_SANDBOX=${EFI_SANDBOX}
+EFI_WEBHOOK_SECRET=${EFI_WEBHOOK_SECRET}
 EOF
   umask 022
 else
+  # Instalações antigas não tinham o segredo do webhook; sem ele a API recusa as confirmações de pagamento.
+  if ! grep -Eq '^EFI_WEBHOOK_SECRET=.+' "$INSTALL_DIR/.env"; then
+    sed -i '/^EFI_WEBHOOK_SECRET=/d' "$INSTALL_DIR/.env"
+    echo "EFI_WEBHOOK_SECRET=$(openssl rand -hex 24)" >> "$INSTALL_DIR/.env"
+    echo "Gerei EFI_WEBHOOK_SECRET no .env. Cadastre de novo o webhook na EFI com a URL que aparece no fim."
+  fi
   if grep -q '^WEB_PORT=' "$INSTALL_DIR/.env"; then
     sed -i "s/^WEB_PORT=.*/WEB_PORT=${WEB_PORT}/" "$INSTALL_DIR/.env"
   else
@@ -364,4 +392,5 @@ else
 fi
 echo "Super admin: ${ADMIN_EMAIL:-o e-mail gravado no .env}"
 echo "Segredos: ${INSTALL_DIR}/.env"
+echo "Webhook da EFI: https://${DOMAIN}/api/billing/webhook?hmac=<valor de EFI_WEBHOOK_SECRET no .env>&ignorar="
 echo "Postgres, Redis e o painel Docker ficam só nesta máquina. O Nginx encaminha o domínio para 127.0.0.1:${WEB_PORT}."

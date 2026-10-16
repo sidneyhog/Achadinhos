@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import axios from "axios";
 import { audit, q } from "../db";
+import { withLock } from "../locks";
 import { decrypt } from "../secrets";
 import { sendImage, sendText, getLive } from "../zapo/session";
 import { searchMercadoLivre, offerEndsSoonText } from "../deals/searchMercadoLivre";
@@ -215,19 +216,21 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
 
   let sent = 0;
   for (const company of companies) {
+   const before = sent;
+   const ran = await withLock(`deals:${company.id}`, 600, async () => {
    try {
     if (!subscriptionOpen({ ...company, status: company.sub_status })) {
       if (company.sub_status === "trialing" && company.trial_ends_at && new Date(company.trial_ends_at) <= new Date()) {
         await q("UPDATE subscriptions SET status = 'past_due', updated_at = now() WHERE company_id = $1 AND status = 'trialing'", [company.id]);
       }
-      continue;
+      return;
     }
     const setting = await q<Setting>("SELECT * FROM settings WHERE company_id = $1", [company.id]);
     const current = setting[0];
-    if (!current?.enabled) continue;
+    if (!current?.enabled) return;
     if (!insideSchedule({ hourStart: current.hour_start, hourEnd: current.hour_end, allowedDays: current.allowed_days })) {
       await q("UPDATE settings SET last_error = $2, updated_at = now() WHERE company_id = $1", [company.id, "Fora do horário ou do dia permitido"]);
-      continue;
+      return;
     }
     if (company.max_posts_per_day) {
       const [{ count }] = await q<{ count: string }>(
@@ -236,7 +239,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
       );
       if (Number(count) >= company.max_posts_per_day) {
         await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, "Limite diário de publicações do plano"]);
-        continue;
+        return;
       }
     }
     if (company.max_posts_per_month) {
@@ -246,7 +249,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
       );
       if (Number(count) >= company.max_posts_per_month) {
         await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, "Limite mensal de publicações do plano"]);
-        continue;
+        return;
       }
     }
 
@@ -265,7 +268,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         campaigns.push({ marketplace: id, query: "", min_discount: null, max_price_cents: null, priority: 0 });
       }
     }
-    if (!campaigns.length) continue;
+    if (!campaigns.length) return;
 
     const sessions = await q<{ id: number; stores: string[]; status: string; send_cadence: Record<string, number> | null; interval_seconds: number | null; posts_per_cycle: number | null }>(
       "SELECT id, stores, status, send_cadence, interval_seconds, posts_per_cycle FROM whatsapp_sessions WHERE company_id = $1 AND enabled = true",
@@ -313,7 +316,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
     );
     if (!publishers.length && !bots.length) {
       await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, "Ative um grupo na conexão que deve publicar, ou conecte um bot do Telegram"]);
-      continue;
+      return;
     }
 
     let ml: Awaited<ReturnType<typeof resolveMlTracking>> | null = null;
@@ -365,7 +368,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         company.id,
         errors[0] || "Nenhuma oferta passou nos filtros"
       ]);
-      continue;
+      return;
     }
     await q("UPDATE settings SET last_run_at = now(), last_error = NULL WHERE company_id = $1", [company.id]);
     const seen = new Set<string>();
@@ -499,10 +502,12 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         }
       }
     }
-    if (sent) await audit(company.id, null, "publish", `${sent} oferta(s) nesta rodada`);
+    if (sent > before) await audit(company.id, null, "publish", `${sent - before} oferta(s) nesta rodada`);
    } catch (err) {
      console.error(`[deals] company=${company.id}`, err);
    }
+   });
+   if (ran === undefined) console.log(`[deals] company=${company.id} já está em outra rodada; pulando`);
   }
   return sent;
 };

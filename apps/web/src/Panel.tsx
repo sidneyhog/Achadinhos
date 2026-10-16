@@ -637,7 +637,7 @@ function MoveBoard({ job, events, online, onRefresh, onError }: { job: any; even
   );
 }
 
-export function Panel({ session, onLogout, onReturn }: { session: Session; onLogout: () => void; onRefresh?: () => Promise<void>; onReturn?: () => void }) {
+export function Panel({ session, onLogout, onReturn }: { session: Session; onLogout: () => void; onRefresh?: () => Promise<unknown>; onReturn?: () => void }) {
   const path = usePath();
   const view: View = path.startsWith("/configuracoes") ? "config" : (Object.entries(PANEL_PATH).find(([, href]) => href === path || path.startsWith(`${href}/`))?.[0] as View) || "dash";
   const setView = (id: View) => go(id === "config" ? "/configuracoes/envio" : PANEL_PATH[id]);

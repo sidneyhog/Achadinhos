@@ -116,7 +116,7 @@ const ICONS: Record<View, string> = {
   profile: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0"
 };
 
-export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Session; onLogout: () => void; onEnter: (token: string) => Promise<void>; onRefresh: () => Promise<void> }) {
+export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Session; onLogout: () => void; onEnter: (token: string) => Promise<void>; onRefresh: () => Promise<unknown> }) {
   const path = usePath();
   const view: View = (Object.entries(ADMIN_PATH).sort((a, b) => b[1].length - a[1].length).find(([, href]) => path === href || path.startsWith(`${href}/`))?.[0] as View) || "dash";
   const setView = (id: View) => go(ADMIN_PATH[id]);

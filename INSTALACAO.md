@@ -36,7 +36,7 @@ cat > .env <<'EOF'
 JWT_SECRET=troque-por-uma-frase-longa-so-sua
 APP_SECRET=troque-por-outra-frase-longa-so-sua
 ADMIN_EMAIL=admin@achadinhos.local
-ADMIN_PASSWORD=admin123456
+ADMIN_PASSWORD=troque-esta-senha
 POSTGRES_PASSWORD=achadinhos
 WEB_BIND=127.0.0.1
 WEB_PORT=8080
@@ -46,6 +46,7 @@ EFI_PIX_KEY=
 EFI_CERT_PATH=
 EFI_CERT_PASSWORD=
 EFI_SANDBOX=true
+EFI_WEBHOOK_SECRET=troque-por-um-valor-aleatorio
 EOF
 ```
 
@@ -59,6 +60,7 @@ O que cada linha faz:
 | `POSTGRES_PASSWORD` | Senha do Postgres. O Compose monta a `DATABASE_URL` com ela. Na máquina local, `achadinhos` basta. |
 | `WEB_BIND` | `127.0.0.1` faz o site existir só nesta máquina. `0.0.0.0` abre a porta na rede. |
 | `WEB_PORT` | Porta do site neste computador. O padrão é `8080` porque a 80 costuma já estar ocupada. |
+| `EFI_WEBHOOK_SECRET` | Segredo que a EFI manda no webhook (`?hmac=`). Sem ele a API recusa as confirmações de pagamento. |
 | `EFI_*` | Cobrança PIX, cartão e boleto. Vazias, o checkout avisa que a EFI não está configurada. `EFI_SANDBOX=true` usa o ambiente de teste. |
 
 ### 1.3 Subir
@@ -86,7 +88,7 @@ docker compose logs worker --tail 80
 
 Abra [http://127.0.0.1:8080](http://127.0.0.1:8080). Se você mudou `WEB_PORT`, use essa porta.
 
-**Entrar** usa o e-mail e a senha do `.env`. Com o exemplo acima: `admin@achadinhos.local` e `admin123456`. Esse usuário cai no Super Admin (`/admin`). Ele não pertence a nenhuma empresa.
+**Entrar** usa o e-mail e a senha do `.env`. Com o exemplo acima: `admin@achadinhos.local` e a senha que você pôs em `ADMIN_PASSWORD` (8 caracteres ou mais; sem ela o super admin não é criado e a API avisa no log). Esse usuário cai no Super Admin (`/admin`). Ele não pertence a nenhuma empresa.
 
 **Criar conta** abre o cadastro de cliente. O cadastro só oferece plano depois que o super admin gravar pelo menos um plano ativo em **Planos**.
 
@@ -143,10 +145,10 @@ Usuário do sistema que vai ser dono da instalação [deploy]:
 Enter cria (ou reaproveita) o usuário Linux `deploy`, com home `/home/deploy`, e coloca esse usuário no grupo `docker`. Outro nome vale se for minúsculo e começar com letra. Esse usuário é o dono dos arquivos. Os containers continuam sendo gerenciados pelo Docker.
 
 ```text
-Pasta da instalação (Enter usa /home/deploy) [/home/deploy]:
+Pasta da instalação (Enter usa /home/deploy/achadinhos) [/home/deploy/achadinhos]:
 ```
 
-Enter instala em `/home/deploy`. O caminho precisa ser absoluto, por exemplo `/opt/achadinhos`. É nessa pasta que ficam o código, o `.env` e o `docker-compose.yml` usados no dia a dia.
+Enter instala em `/home/deploy/achadinhos`. O caminho precisa ser absoluto, por exemplo `/opt/achadinhos`. Use uma pasta só do Achadinhos: a cópia apaga da pasta de destino o que não veio do projeto, e por isso o script recusa uma pasta que já tenha outros arquivos. É nessa pasta que ficam o código, o `.env` e o `docker-compose.yml` usados no dia a dia.
 
 ```text
 Domínio (ex.: painel.suaempresa.com):
@@ -164,10 +166,10 @@ Na **primeira** instalação, ainda pede a conta do painel:
 
 ```text
 E-mail do super admin [admin@painel.suaempresa.com]:
-Senha do super admin (mínimo 6 caracteres):
+Senha do super admin (mínimo 8 caracteres):
 ```
 
-A senha não aparece enquanto você digita. Mínimo de 6 caracteres. Anote os dois: é com eles que você entra em `/login`.
+A senha não aparece enquanto você digita. Mínimo de 8 caracteres. Anote os dois: é com eles que você entra em `/login`.
 
 Se a pasta já tiver `.env`, o script avisa e **mantém** segredos e senha. Não pergunta de novo o super admin.
 
@@ -212,10 +214,10 @@ O Let's Encrypt só emite certificado quando a porta HTTP escolhida é a **80** 
 
 ### 2.5 Conferir se subiu
 
-Na pasta de instalação (`/home/deploy`, se você aceitou o padrão):
+Na pasta de instalação (`/home/deploy/achadinhos`, se você aceitou o padrão):
 
 ```bash
-cd /home/deploy
+cd /home/deploy/achadinhos
 sudo docker compose ps
 ```
 
@@ -224,7 +226,7 @@ Os cinco serviços precisam estar de pé. Abra o endereço que o script imprimiu
 A senha também está em `ADMIN_PASSWORD` dentro do `.env` dessa pasta. Leia com:
 
 ```bash
-sudo grep '^ADMIN_EMAIL=\|^ADMIN_PASSWORD=' /home/deploy/.env
+sudo grep '^ADMIN_EMAIL=\|^ADMIN_PASSWORD=' /home/deploy/achadinhos/.env
 ```
 
 Troque a senha em **Perfil** no primeiro acesso. Mudar `ADMIN_PASSWORD` no `.env` depois que o usuário já foi criado não altera a senha do banco.
@@ -236,23 +238,23 @@ O sistema sobe sem plano. Sem plano ativo, a página inicial não oferece assina
 1. Entre como super admin.
 2. Em **Planos**, grave nome, preço e benefícios e deixe o plano ativo.
 3. Em **Configurações**, grave o SMTP se o aviso de vencimento for sair por e-mail. Sem SMTP, o aviso aparece só no painel.
-4. A cobrança real ainda pede a EFI. Em **Integrações**, grave Client ID, Client Secret e a chave PIX, e rode o teste de conexão. O arquivo `.pfx` fica no servidor. O caminho dele entra em `EFI_CERT_PATH` no `.env`, e a senha do arquivo em `EFI_CERT_PASSWORD`. Exemplo, com o arquivo em `/home/deploy/certificados/efi.pfx`:
+4. A cobrança real ainda pede a EFI. Em **Integrações**, grave Client ID, Client Secret e a chave PIX, e rode o teste de conexão. O arquivo `.pfx` fica no servidor. O caminho dele entra em `EFI_CERT_PATH` no `.env`, e a senha do arquivo em `EFI_CERT_PASSWORD`. Exemplo, com o arquivo em `/home/deploy/achadinhos/certificados/efi.pfx`:
 
 ```bash
-sudo mkdir -p /home/deploy/certificados
-sudo cp /caminho/do/arquivo.pfx /home/deploy/certificados/efi.pfx
-sudo chown deploy:deploy /home/deploy/certificados/efi.pfx
-sudo chmod 600 /home/deploy/certificados/efi.pfx
+sudo mkdir -p /home/deploy/achadinhos/certificados
+sudo cp /caminho/do/arquivo.pfx /home/deploy/achadinhos/certificados/efi.pfx
+sudo chown deploy:deploy /home/deploy/achadinhos/certificados/efi.pfx
+sudo chmod 600 /home/deploy/achadinhos/certificados/efi.pfx
 ```
 
-Edite o `.env` e preencha `EFI_CERT_PATH=/home/deploy/certificados/efi.pfx`. Com cobrança real, `EFI_SANDBOX=false`. Reinicie API e worker para eles lerem o arquivo:
+A pasta `certificados` da instalação aparece dentro do container como `/certificados` (só leitura). Edite o `.env` e preencha `EFI_CERT_PATH=/certificados/efi.pfx` (o caminho de dentro do container, não o da VPS). Com cobrança real, `EFI_SANDBOX=false`. Reinicie API e worker para eles lerem o arquivo:
 
 ```bash
-cd /home/deploy
+cd /home/deploy/achadinhos
 sudo docker compose up -d
 ```
 
-O webhook para cadastrar na EFI é `https://seu-dominio/api/billing/webhook`.
+O webhook para cadastrar na EFI é `https://seu-dominio/api/billing/webhook?hmac=SEGREDO&ignorar=`, trocando `SEGREDO` pelo valor de `EFI_WEBHOOK_SECRET` no `.env`. Sem o segredo certo a API responde 401 e não marca a fatura como paga. O `&ignorar=` existe porque a EFI acrescenta `/pix` no fim da URL; a API também aceita `/api/billing/webhook/pix`. A confirmação só ativa a assinatura quando o valor pago é igual ao da fatura.
 
 ---
 
@@ -269,7 +271,7 @@ sudo bash instalador/instalar.sh
 Responda as mesmas portas de antes. Se o código novo já estiver na pasta de instalação e você só quiser reconstruir os containers:
 
 ```bash
-cd /home/deploy
+cd /home/deploy/achadinhos
 sudo docker compose up -d --build
 ```
 
@@ -308,15 +310,15 @@ Um erro de senha do Postgres nessa log significa que `POSTGRES_PASSWORD` no `.en
 
 | Lugar | O que guarda |
 | --- | --- |
-| `/home/deploy/.env` | Senhas e segredos. Permissão 600. |
-| `/home/deploy/.instalador.env` | Domínio, portas e e-mail do certificado escolhidos na última execução. |
+| `/home/deploy/achadinhos/.env` | Senhas e segredos. Permissão 600. |
+| `/home/deploy/achadinhos/.instalador.env` | Domínio, portas e e-mail do certificado escolhidos na última execução. |
 | Volume Docker `pgdata` | Empresas, usuários, planos, ofertas e o restante do banco. |
 | Volume Docker `zapodata` | Sessão do WhatsApp. Apagar este volume pede QR de novo. |
 
 O instalador não faz backup. Antes de uma atualização grande, grave uma cópia do banco a partir da pasta de instalação:
 
 ```bash
-cd /home/deploy
+cd /home/deploy/achadinhos
 sudo docker compose exec -T postgres pg_dump -U achadinhos achadinhos > backup-$(date +%F).sql
 ```
 

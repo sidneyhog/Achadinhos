@@ -1,0 +1,155 @@
+# Stack do Achadinhos para o Portainer (Docker Swarm, padrão Orion), atrás do Traefik da VPS.
+# Pronto para colar: não precisa preencher nenhuma variável.
+#
+# - Segredos (JWT_SECRET, APP_SECRET, EFI_WEBHOOK_SECRET) são gerados sozinhos na primeira subida e
+#   guardados no volume achadinhos_dados. Não apague esse volume: o APP_SECRET cifra as credenciais das lojas.
+# - Banco Postgres e Redis próprios, só na rede interna do stack (sem acesso de fora).
+# - Login inicial: admin@admin.com / admin123  →  TROQUE em Perfil logo no primeiro acesso.
+#
+# Opcionais (Environment variables): DOMINIO, ADMIN_EMAIL, ADMIN_PASSWORD, REDE_VPS, CERT_RESOLVER,
+# ENTRYPOINT_HTTPS, IMAGEM_API, IMAGEM_WEB, EFI_* — os padrões abaixo já são os desta VPS.
+
+version: "3.8"
+
+x-api-env: &api-env
+  DATABASE_URL: postgres://achadinhos:achadinhos@achadinhos-db:5432/achadinhos
+  REDIS_URL: redis://achadinhos-redis:6379
+  ZAPO_AUTH_DIR: /data/zapo
+  AUTO_SECRETS_FILE: /data/segredos/segredos.json
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+  EFI_CLIENT_ID: ${EFI_CLIENT_ID:-}
+  EFI_CLIENT_SECRET: ${EFI_CLIENT_SECRET:-}
+  EFI_PIX_KEY: ${EFI_PIX_KEY:-}
+  EFI_CERT_PATH: ${EFI_CERT_PATH:-}
+  EFI_CERT_PASSWORD: ${EFI_CERT_PASSWORD:-}
+  EFI_SANDBOX: ${EFI_SANDBOX:-true}
+  TZ: America/Sao_Paulo
+
+x-placement: &so-manager
+  placement:
+    constraints:
+      - node.role == manager
+
+services:
+  achadinhos-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: achadinhos
+      POSTGRES_PASSWORD: achadinhos   # só acessível pela rede interna deste stack
+      POSTGRES_DB: achadinhos
+    volumes:
+      - achadinhos_pgdata:/var/lib/postgresql/data
+    networks:
+      - interna
+    deploy:
+      <<: *so-manager
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          memory: 512M
+
+  achadinhos-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    networks:
+      - interna
+    deploy:
+      <<: *so-manager
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          memory: 192M
+
+  # API: cria as tabelas na subida. No primeiro minuto pode reiniciar enquanto o banco sobe (normal).
+  achadinhos-api:
+    image: ${IMAGEM_API:-ghcr.io/sidneyhog/achadinhos-api:latest}
+    environment: *api-env
+    volumes:
+      - achadinhos_dados:/data/segredos
+      - achadinhos_zapo:/data/zapo
+      - achadinhos_certificados:/certificados:ro
+    networks:
+      - interna
+    deploy:
+      <<: *so-manager
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+      resources:
+        limits:
+          memory: 768M
+
+  # Worker: WhatsApp e robô de ofertas. Sempre 1 réplica.
+  achadinhos-worker:
+    image: ${IMAGEM_API:-ghcr.io/sidneyhog/achadinhos-api:latest}
+    command: ["npx", "tsx", "src/worker.ts"]
+    environment: *api-env
+    volumes:
+      - achadinhos_dados:/data/segredos
+      - achadinhos_zapo:/data/zapo
+    networks:
+      - interna
+    deploy:
+      <<: *so-manager
+      endpoint_mode: dnsrr
+      replicas: 1
+      update_config:
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 5s
+      resources:
+        limits:
+          memory: 1024M
+
+  # Site + proxy para a API. Único serviço ligado ao Traefik.
+  achadinhos-web:
+    image: ${IMAGEM_WEB:-ghcr.io/sidneyhog/achadinhos-web:latest}
+    environment:
+      API_UPSTREAM: achadinhos-api:4000
+    networks:
+      - interna
+      - vps
+    deploy:
+      <<: *so-manager
+      endpoint_mode: dnsrr
+      replicas: 1
+      update_config:
+        order: start-first
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          memory: 128M
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=${REDE_VPS:-DevTabeliao}
+        - traefik.http.routers.achadinhos.rule=Host(`${DOMINIO:-achadinhos.nexiabr.site}`)
+        - traefik.http.routers.achadinhos.entrypoints=${ENTRYPOINT_HTTPS:-websecure}
+        - traefik.http.routers.achadinhos.tls=true
+        - traefik.http.routers.achadinhos.tls.certresolver=${CERT_RESOLVER:-letsencryptresolver}
+        - traefik.http.routers.achadinhos.service=achadinhos
+        - traefik.http.services.achadinhos.loadbalancer.server.port=80
+        - traefik.http.services.achadinhos.loadbalancer.passHostHeader=true
+
+volumes:
+  achadinhos_pgdata:
+  achadinhos_dados:
+  achadinhos_zapo:
+  achadinhos_certificados:
+
+networks:
+  interna:
+    driver: overlay
+  vps:
+    external: true
+    name: ${REDE_VPS:-DevTabeliao}
