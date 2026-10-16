@@ -152,16 +152,19 @@ const fetchOffers = async (
     return links;
   }
   if (marketplace === "shopee") {
-    if (!secret.appId || !secret.secret) throw new Error("Shopee publica com App ID e Secret");
-    return searchShopee({ query: query || "oferta", appId: secret.appId, secret: secret.secret });
+    // O painel salva o App ID em public_config e só o Secret nos segredos.
+    const appId = secret.appId || pub.appId || "";
+    if (!appId || !secret.secret) throw new Error(`Shopee publica com App ID e Secret (falta ${!appId ? "o App ID" : "o Secret"})`);
+    return searchShopee({ query: query || "oferta", appId, secret: secret.secret });
   }
   if (marketplace === "aliexpress") {
     return searchAliExpress({
       query,
       companyId: setting.company_id,
-      appKey: secret.appKey,
+      // App Key e Tracking ID ficam em public_config (formulário do painel); o Secret, nos segredos.
+      appKey: secret.appKey || pub.appKey,
       appSecret: secret.appSecret,
-      trackingId: secret.trackingId
+      trackingId: secret.trackingId || pub.trackingId
     });
   }
   if (marketplace === "awin" || AWIN[marketplace]) {
