@@ -91,4 +91,36 @@ test("Mercado Livre: acha ofertas na lista padrão, em outro lugar da página e 
   const vazio = offersFromOffersPage(page({ appProps: { pageProps: { data: { banners: [], filtros: {} } } } }));
   assert.equal(vazio.offers.length, 0);
   assert.equal(vazio.keys, "banners,filtros", "sem ofertas, mostra as chaves para diagnóstico");
+  assert.equal(vazio.blocked, false);
+});
+
+test("Mercado Livre: reconhece a página de verificação de conta (bloqueio sem login)", async () => {
+  const { offersFromOffersPage } = await import("../src/deals/searchMercadoLivre");
+  // Trecho real (encurtado) do que /ofertas devolve em 16/10/2026, da VPS e de IP residencial: 302 -> /gz/account-verification.
+  const ctx = {
+    flags: {},
+    assets: {},
+    support: {},
+    title: "Mercado Libre",
+    framework: {},
+    appProps: {
+      pageProps: {
+        openInApp: { shouldRedirect: false, from: { all: false }, redirectUrl: null },
+        deviceType: "desktop",
+        deviceOS: "windows",
+        tid: "8e8e50bd-40e4-4b29-8a3f-cf454cc91f06",
+        inWebview: false,
+        authLinks: {
+          login: "https://www.mercadolivre.com/jms/mlb/lgz/login?platform_id=ml&go=https%3A%2F%2Fwww.mercadolivre.com.br%2Fofertas&loginType=negative_traffic&trace_id=8e8e50bd-40e4-4b29-8a3f-cf454cc91f06",
+          registration: "https://www.mercadolivre.com.br/registration?confirmation_url=https%3A%2F%2Fwww.mercadolivre.com.br%2Fofertas&registrationType=negative_traffic&trace_id=8e8e50bd-40e4-4b29-8a3f-cf454cc91f06"
+        },
+        header: { logoUrl: "https://http2.mlstatic.com/frontend-assets/ui-navigation/5.21.22/mercadolibre/logo__small@2x.png" }
+      }
+    },
+    mainEntry: "gz-account-verification-index"
+  };
+  const html = `<html><head><title id="root-title">Mercado Libre</title></head><body><script>window.__NORDIC_RENDERING_CTX__ = ${JSON.stringify(ctx)};</script></body></html>`;
+  const result = offersFromOffersPage(html);
+  assert.equal(result.blocked, true);
+  assert.equal(result.offers.length, 0);
 });

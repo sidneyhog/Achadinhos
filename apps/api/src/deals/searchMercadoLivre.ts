@@ -169,26 +169,38 @@ const fromJsonLd = (html: string): DealOffer[] => {
   return offers;
 };
 
+/**
+ * Sem login, o ML redireciona (302) /ofertas e lista.* para /gz/account-verification ("negative_traffic").
+ * O axios segue o redirecionamento e recebe HTTP 200 com __NORDIC_RENDERING_CTX__, mas sem nenhum produto.
+ */
+const isVerificationWall = (parsed: any, html: string): boolean =>
+  /account-verification/i.test(String(parsed?.mainEntry || "")) ||
+  /loginType=negative_traffic/i.test(JSON.stringify(parsed?.appProps?.pageProps?.authLinks || "")) ||
+  (!parsed && /\/gz\/account-verification/i.test(html));
+
 /** Ofertas da página /ofertas do ML. Exportada para teste. */
-export const offersFromOffersPage = (html: string): { offers: DealOffer[]; how: string; keys: string } => {
+export const offersFromOffersPage = (
+  html: string
+): { offers: DealOffer[]; how: string; keys: string; blocked: boolean } => {
   let parsed: any = null;
   try {
     parsed = extractObject(html, "__NORDIC_RENDERING_CTX__");
   } catch {
     parsed = null;
   }
+  if (isVerificationWall(parsed, html)) return { offers: [], how: "", keys: "", blocked: true };
   const direct = parsed?.appProps?.pageProps?.data?.items;
   if (Array.isArray(direct) && direct.length) {
     const offers = direct.map((item: any) => cardToOffer(item?.card)).filter((offer): offer is DealOffer => !!offer);
-    if (offers.length) return { offers, how: "lista padrão", keys: "" };
+    if (offers.length) return { offers, how: "lista padrão", keys: "", blocked: false };
   }
   const deep = findCards(parsed).map(cardToOffer).filter((offer): offer is DealOffer => !!offer);
-  if (deep.length) return { offers: deep, how: "cartões encontrados na página", keys: "" };
+  if (deep.length) return { offers: deep, how: "cartões encontrados na página", keys: "", blocked: false };
   const ld = fromJsonLd(html);
-  if (ld.length) return { offers: ld, how: "dados estruturados", keys: "" };
+  if (ld.length) return { offers: ld, how: "dados estruturados", keys: "", blocked: false };
   const data = parsed?.appProps?.pageProps?.data;
   const keys = data && typeof data === "object" ? Object.keys(data).slice(0, 12).join(",") : parsed ? Object.keys(parsed).slice(0, 12).join(",") : "";
-  return { offers: [], how: "", keys };
+  return { offers: [], how: "", keys, blocked: false };
 };
 
 let catalogCache: { at: number; offers: DealOffer[] } | null = null;
@@ -221,7 +233,9 @@ const loadOfferCatalog = async (): Promise<DealOffer[]> => {
       const html = String(response.data);
       const result = offersFromOffersPage(html);
       if (page === 1) {
-        lastFetch.page = pageSummary(response.status, html, result.offers.length) + (result.keys ? `, chaves: ${result.keys}` : "");
+        lastFetch.page = result.blocked
+          ? "o ML redirecionou para a verificação de conta (login exigido para tráfego sem sessão)"
+          : pageSummary(response.status, html, result.offers.length) + (result.keys ? `, chaves: ${result.keys}` : "");
       }
       return result.offers;
     })
@@ -304,7 +318,7 @@ export const searchMercadoLivre = async (
   if (!offers.length) offers = await loadOfferCatalog();
   if (!offers.length) {
     // Sem isto o painel mostrava "Nenhuma oferta passou nos filtros", e o problema real (ML sem resposta útil) ficava escondido.
-    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). Pode ser bloqueio do ML ao IP da VPS.`);
+    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("verificação de conta") ? "O ML passou a exigir login para ler ofertas sem sessão." : "Pode ser bloqueio do ML ao IP da VPS."}`);
   }
   const wanted = offers.filter(offer => matchesQuery(offer, query));
   const pool = (wanted.length ? wanted : offers).sort(
