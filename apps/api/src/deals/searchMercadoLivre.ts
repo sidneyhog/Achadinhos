@@ -1,4 +1,5 @@
 import axios from "axios";
+import { createHash } from "node:crypto";
 import { DealOffer } from "./types";
 import { applyMlTracking, MlTracking } from "./mlAffiliate";
 
@@ -203,10 +204,23 @@ export const offersFromOffersPage = (
   return { offers: [], how: "", keys, blocked: false };
 };
 
-let catalogCache: { at: number; offers: DealOffer[] } | null = null;
+/** Uma entrada por cookie: o catálogo lido com a sessão de uma empresa não vai para outra. */
+const catalogCache = new Map<string, { at: number; offers: DealOffer[] }>();
 
 /** O que o ML respondeu na última tentativa; vai para a mensagem de erro do painel quando não vem nenhuma oferta. */
 const lastFetch = { api: "", page: "" };
+
+/** Cabeçalhos do /ofertas. Com o cookie de sessão salvo pela empresa, o ML não manda para a verificação de conta. Exportada para teste. */
+export const offersPageHeaders = (cookie?: string): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "User-Agent": UA,
+    Accept: "text/html",
+    "Accept-Language": "pt-BR,pt;q=0.9"
+  };
+  const trimmed = String(cookie || "").trim();
+  if (trimmed) headers.Cookie = trimmed;
+  return headers;
+};
 
 const pageSummary = (status: number, html: string, items: number): string => {
   const title = (html.match(/<title[^>]*>([^<]{0,80})/i)?.[1] || "").trim();
@@ -214,9 +228,11 @@ const pageSummary = (status: number, html: string, items: number): string => {
   return `HTTP ${status}, ${marker}, ${items} itens${title ? `, título "${title}"` : ""}`;
 };
 
-const loadOfferCatalog = async (): Promise<DealOffer[]> => {
-  if (catalogCache && Date.now() - catalogCache.at < 3 * 60 * 1000) {
-    return catalogCache.offers;
+const loadOfferCatalog = async (cookie = ""): Promise<DealOffer[]> => {
+  const cacheKey = cookie ? createHash("sha256").update(cookie).digest("hex") : "";
+  const cached = catalogCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 3 * 60 * 1000) {
+    return cached.offers;
   }
   const pages = await Promise.all(
     [1, 2].map(async page => {
@@ -224,29 +240,27 @@ const loadOfferCatalog = async (): Promise<DealOffer[]> => {
         params: page === 1 ? {} : { page },
         timeout: 20000,
         responseType: "text",
-        headers: {
-          "User-Agent": UA,
-          Accept: "text/html",
-          "Accept-Language": "pt-BR,pt;q=0.9"
-        }
+        headers: offersPageHeaders(cookie)
       });
       const html = String(response.data);
       const result = offersFromOffersPage(html);
       if (page === 1) {
         lastFetch.page = result.blocked
-          ? "o ML redirecionou para a verificação de conta (login exigido para tráfego sem sessão)"
+          ? cookie
+            ? "o ML redirecionou para a verificação de conta mesmo com o cookie salvo (sessão expirada ou recusada)"
+            : "o ML redirecionou para a verificação de conta (login exigido; salve o cookie de sessão do Mercado Livre nas configurações)"
           : pageSummary(response.status, html, result.offers.length) + (result.keys ? `, chaves: ${result.keys}` : "");
       }
       return result.offers;
     })
   );
   const offers = pages.flat();
-  catalogCache = { at: Date.now(), offers };
+  catalogCache.set(cacheKey, { at: Date.now(), offers });
   return offers;
 };
 
-export const catalogImageMap = async (): Promise<Map<string, string>> => {
-  const offers = await loadOfferCatalog();
+export const catalogImageMap = async (cookie = ""): Promise<Map<string, string>> => {
+  const offers = await loadOfferCatalog(cookie);
   const images = new Map<string, string>();
   offers.forEach(offer => {
     if (offer.externalId && offer.imageUrl) images.set(offer.externalId, offer.imageUrl);
@@ -304,7 +318,8 @@ const matchesQuery = (offer: DealOffer, query: string): boolean => {
 /** A API de busca responde 403. O catálogo público de ofertas entra no lugar. */
 export const searchMercadoLivre = async (
   query: string,
-  tracking: MlTracking
+  tracking: MlTracking,
+  cookie = ""
 ): Promise<DealOffer[]> => {
   let offers: DealOffer[] = [];
   try {
@@ -315,10 +330,10 @@ export const searchMercadoLivre = async (
     lastFetch.api = status ? `HTTP ${status}` : String((err as Error).message || err).slice(0, 60);
     offers = [];
   }
-  if (!offers.length) offers = await loadOfferCatalog();
+  if (!offers.length) offers = await loadOfferCatalog(cookie);
   if (!offers.length) {
     // Sem isto o painel mostrava "Nenhuma oferta passou nos filtros", e o problema real (ML sem resposta útil) ficava escondido.
-    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("verificação de conta") ? "O ML passou a exigir login para ler ofertas sem sessão." : "Pode ser bloqueio do ML ao IP da VPS."}`);
+    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("verificação de conta") ? "O ML exige uma sessão logada para ler as ofertas." : "Pode ser bloqueio do ML ao IP da VPS."}`);
   }
   const wanted = offers.filter(offer => matchesQuery(offer, query));
   const pool = (wanted.length ? wanted : offers).sort(

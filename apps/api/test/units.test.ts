@@ -124,3 +124,10 @@ test("Mercado Livre: reconhece a página de verificação de conta (bloqueio sem
   assert.equal(result.blocked, true);
   assert.equal(result.offers.length, 0);
 });
+
+test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
+  const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
+  assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");
+  assert.equal("Cookie" in offersPageHeaders(""), false, "sem cookie salvo, não manda cabeçalho vazio");
+  assert.equal("Cookie" in offersPageHeaders(), false);
+});

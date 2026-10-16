@@ -131,7 +131,7 @@ const fetchOffers = async (
   const pub = store?.public_config || {};
   if (marketplace === "ml") {
     if (!ml) throw new Error("Mercado Livre sem código de afiliado");
-    return searchMercadoLivre(query, ml);
+    return searchMercadoLivre(query, ml, decrypt(setting.ml_cookie_enc || ""));
   }
   if (marketplace === "amazon") {
     const links = amazonOffersFromLinks(secret.links || pub.links || "", pub.partnerTag || secret.partnerTag || "");
