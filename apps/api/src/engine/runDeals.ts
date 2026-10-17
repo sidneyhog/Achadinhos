@@ -148,8 +148,33 @@ const statusAudience = async (companyId: number, whatsappId: number, groups: Arr
   const own = getLive(whatsappId)?.client;
   const creds = own?.getCredentials?.() || own?.auth?.getCredentials?.() || null;
   const extra = statusRecipients(contacts.map(row => ({ jid: `${row.phone}@s.whatsapp.net` })), [creds?.meJid || ""]);
-  return [...new Set([...fromGroups, ...extra])].slice(0, STATUS_LIMITS.maxRecipients);
+  // O Status sai pelo LID da conta; o WhatsApp recusa (erro 400) lista com número de telefone misturado.
+  // Converte os números para LID e descarta quem não tem LID conhecido.
+  const lids = new Set<string>();
+  const phones: string[] = [];
+  for (const jid of [...fromGroups, ...extra]) {
+    if (jid.endsWith("@lid")) lids.add(jid);
+    else phones.push(jid.split("@")[0]);
+  }
+  const lookup = own?.profile?.getLidsByPhoneNumbers;
+  if (lookup) {
+    for (let i = 0; i < phones.length && lids.size < STATUS_SEND_CAP; i += 100) {
+      try {
+        const found = await lookup(phones.slice(i, i + 100));
+        for (const row of found) {
+          if (row.exists !== false && row.lidJid) lids.add(`${row.lidJid.split("@")[0].split(":")[0]}@lid`);
+        }
+      } catch {
+        /* lote sem resposta: segue com os outros */
+      }
+    }
+  }
+  const meLid = String(creds?.meLid || "").split("@")[0].split(":")[0];
+  return [...lids].filter(jid => jid.split("@")[0] !== meLid).slice(0, STATUS_SEND_CAP);
 };
+
+/** Até quantas pessoas um Status vai: listas grandes demais também são recusadas pelo WhatsApp. */
+const STATUS_SEND_CAP = 1000;
 
 const AWIN: Record<string, string> = {
   samsung: "58389",
@@ -570,7 +595,16 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
             if (!pub.recipients.length) throw new Error("ninguém para ver: ative um grupo nesta conexão ou traga contatos para a Base");
             // Formato curto, com a foto do produto; sem foto, vai o texto com prévia do link.
             const image = await imageOf();
-            await sendStatus(pub.id, pub.recipients, image ? Buffer.from(image) : null, statusCaption(offer, published), image ? undefined : await previewOf());
+            const preview = image ? undefined : await previewOf();
+            const send = (to: string[]) => sendStatus(pub.id, to, image ? Buffer.from(image) : null, statusCaption(offer, published), preview);
+            try {
+              await send(pub.recipients);
+            } catch (err) {
+              // Recusa do WhatsApp (400): tenta uma vez com uma lista menor antes de desistir.
+              if (!/error=400/.test(String((err as Error).message)) || pub.recipients.length <= 200) throw err;
+              pub.recipients = pub.recipients.slice(0, 200);
+              await send(pub.recipients);
+            }
             await q(
               `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Status','sent',$9,$10)`,

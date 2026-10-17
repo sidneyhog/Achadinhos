@@ -30,7 +30,7 @@ export type LiveSession = {
       queryInviteCode?: (jid: string) => Promise<string>;
     };
     profile?: {
-      getLidsByPhoneNumbers?: (phones: string[]) => Promise<Array<{ exists?: boolean }>>;
+      getLidsByPhoneNumbers?: (phones: string[]) => Promise<Array<{ exists?: boolean; lidJid?: string | null }>>;
     };
     getCredentials?: () => { meJid?: string; meLid?: string } | null;
     auth?: { getCredentials?: () => { meJid?: string; meLid?: string } | null };
