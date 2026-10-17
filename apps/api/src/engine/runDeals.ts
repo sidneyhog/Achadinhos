@@ -135,6 +135,9 @@ const loadStatusRecipients = async (whatsappId: number, groups: Array<{ group_ji
   return statusRecipients(participants, [creds?.meJid || "", creds?.meLid || ""]);
 };
 
+/** Intervalo do Status por loja; sem valor salvo, 1 hora (o mesmo padrão mostrado no painel). */
+const statusWait = (cadence: Record<string, number>, marketplace: string) => cadence[marketplace] || 3600;
+
 /** Quem vê o Status: participantes dos grupos da conexão + contatos da Base (sem bloqueados), sem repetir. */
 const statusAudience = async (companyId: number, whatsappId: number, groups: Array<{ group_jid: string }>) => {
   const fromGroups = groups.length ? await loadStatusRecipients(whatsappId, groups) : [];
@@ -368,12 +371,11 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
            FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' GROUP BY marketplace`,
           [company.id, session.id, STATUS_JID]
         );
-        const ownStatus = session.status_cadence && Object.keys(session.status_cadence).length ? session.status_cadence : session.send_cadence && Object.keys(session.send_cadence).length ? session.send_cadence : current.send_cadence;
         statusPubs.push({
           id: session.id,
           stores: session.status_stores || [],
           groups: mine,
-          cadence: readSendCadence(ownStatus),
+          cadence: readSendCadence(session.status_cadence || {}),
           intervalMs: Math.min(180, Math.max(5, Number(session.interval_seconds ?? current.interval_seconds) || 20)) * 1000,
           perCycle: Math.min(5, Math.max(1, Number(session.status_per_cycle) || 1)),
           perDay: Math.min(STATUS_LIMITS.maxPerDay, Math.max(1, Number(session.status_per_day) || STATUS_LIMITS.defaultPerDay)),
@@ -448,7 +450,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         if (pub.sentToday >= pub.perDay) return false;
         if (pub.stores.length && !pub.stores.includes(watch.marketplace)) return false;
         const last = pub.lastSent.get(watch.marketplace) || 0;
-        return !last || Date.now() - last >= cadenceSeconds(pub.cadence, watch.marketplace) * 1000;
+        return !last || Date.now() - last >= statusWait(pub.cadence, watch.marketplace) * 1000;
       });
       if (!waDue && !botDue && !statusDue) continue;
       try {
@@ -557,7 +559,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           if ((pub.posted.get(marketplace) || 0) >= pub.perCycle) continue;
           if (pub.stores.length && !pub.stores.includes(offer.marketplace)) continue;
           const last = pub.lastSent.get(marketplace) || 0;
-          if (last && Date.now() - last < cadenceSeconds(pub.cadence, marketplace) * 1000) continue;
+          if (last && Date.now() - last < statusWait(pub.cadence, marketplace) * 1000) continue;
           const repeated = await q(
             `SELECT id FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $4 AND external_id = $5) OR url = $6) LIMIT 1`,
             [company.id, pub.id, STATUS_JID, offer.marketplace, offer.externalId, published]
