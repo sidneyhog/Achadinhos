@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { q } from "../db";
@@ -58,6 +59,55 @@ const setStatus = async (id: number, patch: Record<string, unknown>) => {
   await q(`UPDATE whatsapp_sessions SET ${sets} WHERE id = $1`, [id, ...keys.map(key => patch[key])]);
 };
 
+/**
+ * Agenda do celular (o "Meus contatos" do Status). Ela chega ao aparelho conectado pela sincronização
+ * do WhatsApp, coleção critical_unblock_low. Para receber a agenda inteira de novo, esquece o estado
+ * salvo dessa coleção antes de conectar: o WhatsApp então manda o retrato completo, como no pareamento.
+ */
+const ADDRESS_BOOK_COLLECTION = "critical_unblock_low";
+
+const forgetAddressBookState = async (file: string) => {
+  if (!existsSync(file)) return;
+  // better-sqlite3 já vem com o @zapo-js/store-sqlite; sem tipos, então o import é dinâmico.
+  const driver = "better-sqlite3";
+  const { default: Database } = (await import(driver)) as { default: new (path: string) => { prepare: (sql: string) => { run: (...args: unknown[]) => unknown }; close: () => void } };
+  const db = new Database(file);
+  try {
+    db.prepare("DELETE FROM appstate_collection_index_values WHERE collection = ?").run(ADDRESS_BOOK_COLLECTION);
+    db.prepare("DELETE FROM appstate_collection_versions WHERE collection = ?").run(ADDRESS_BOOK_COLLECTION);
+  } finally {
+    db.close();
+  }
+};
+
+const userOf = (jid: unknown) => String(jid || "").split("@")[0].split(":")[0];
+
+const saveAddressBookEntry = async (whatsappId: number, event: {
+  schema?: string;
+  operation?: string;
+  _raw?: { indexParts?: readonly string[] };
+  contactAction?: { fullName?: string | null; firstName?: string | null; lidJid?: string | null; pnJid?: string | null } | null;
+  lidContactAction?: { fullName?: string | null; firstName?: string | null } | null;
+}) => {
+  if (event.schema !== "Contact" && event.schema !== "LidContact") return;
+  const jid = String(event._raw?.indexParts?.[1] || "");
+  if (!jid.includes("@")) return;
+  if (event.operation === "remove") {
+    await q("DELETE FROM wa_address_book WHERE whatsapp_id = $1 AND jid = $2", [whatsappId, jid]);
+    return;
+  }
+  const action = event.contactAction || event.lidContactAction || {};
+  const lidJid = jid.endsWith("@lid") ? jid : (event.contactAction?.lidJid || "");
+  const pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (event.contactAction?.pnJid || "");
+  const lid = lidJid ? `${userOf(lidJid)}@lid` : null;
+  const phone = pnJid ? userOf(pnJid).replace(/\D/g, "") || null : null;
+  await q(
+    `INSERT INTO wa_address_book (whatsapp_id, jid, lid, phone, name, updated_at) VALUES ($1,$2,$3,$4,$5,now())
+     ON CONFLICT (whatsapp_id, jid) DO UPDATE SET lid = COALESCE(EXCLUDED.lid, wa_address_book.lid), phone = COALESCE(EXCLUDED.phone, wa_address_book.phone), name = COALESCE(EXCLUDED.name, wa_address_book.name), updated_at = now()`,
+    [whatsappId, jid, lid, phone, String(action.fullName || action.firstName || "").slice(0, 120) || null]
+  );
+};
+
 export const getLive = (id: number) => live.get(id) ?? null;
 export const liveIds = () => [...live.keys()];
 
@@ -69,11 +119,21 @@ export const startSession = async (row: { id: number; company_id: number; name: 
     const { createSqliteStore } = await import("@zapo-js/store-sqlite");
     const dir = authDir();
     await mkdir(dir, { recursive: true });
+    const file = join(dir, `${row.company_id}-${row.id}.sqlite`);
+    const [book] = await q<{ address_book_synced_at: string | null }>("SELECT address_book_synced_at FROM whatsapp_sessions WHERE id = $1", [row.id]);
+    if (book && !book.address_book_synced_at) {
+      try {
+        await forgetAddressBookState(file);
+      } catch (err) {
+        console.error("[zapo] agenda: não limpou o estado salvo", (err as Error).message);
+      }
+      await setStatus(row.id, { address_book_synced_at: new Date() });
+    }
     const logger = await createPinoLogger({ level: "warn", pretty: false });
     const store = createStore({
       backends: {
         sqlite: createSqliteStore({
-          path: join(dir, `${row.company_id}-${row.id}.sqlite`),
+          path: file,
           driver: "auto"
         })
       },
@@ -96,7 +156,9 @@ export const startSession = async (row: { id: number; company_id: number; name: 
         store,
         sessionId: `${row.company_id}-${row.id}`,
         connectTimeoutMs: 120_000,
-        nodeQueryTimeoutMs: 30_000
+        nodeQueryTimeoutMs: 30_000,
+        // Sem isto a agenda que chega no retrato completo não vira evento.
+        chatEvents: { emitSnapshotMutations: true }
       },
       logger
     );
@@ -107,6 +169,9 @@ export const startSession = async (row: { id: number; company_id: number; name: 
       const toDataURL = qrcode.toDataURL || qrcode.default?.toDataURL;
       const image = event.qr.startsWith("data:") ? event.qr : await toDataURL(event.qr, { margin: 1, width: 280 });
       await setStatus(row.id, { status: "qrcode", qr: image, qr_at: new Date(), last_error: null });
+    });
+    client.on("mutation", (event: unknown) => {
+      void saveAddressBookEntry(row.id, event as Parameters<typeof saveAddressBookEntry>[1]).catch(err => console.error("[zapo] agenda", (err as Error).message));
     });
     client.on("auth_paired", async (event: { credentials?: { meJid?: string } }) => {
       const phone = String(event?.credentials?.meJid || "").split("@")[0].split(":")[0];

@@ -138,7 +138,7 @@ const loadStatusRecipients = async (whatsappId: number, groups: Array<{ group_ji
 /** Intervalo do Status por loja; sem valor salvo, 1 hora (o mesmo padrão mostrado no painel). */
 const statusWait = (cadence: Record<string, number>, marketplace: string) => cadence[marketplace] || 3600;
 
-/** Quem vê o Status: participantes dos grupos da conexão + contatos da Base (sem bloqueados), sem repetir. */
+/** Quem vê o Status: agenda do celular (como "Meus contatos"), participantes dos grupos e contatos da Base, sem repetir. */
 const statusAudience = async (companyId: number, whatsappId: number, groups: Array<{ group_jid: string }>) => {
   const fromGroups = groups.length ? await loadStatusRecipients(whatsappId, groups) : [];
   const contacts = await q<{ phone: string }>(
@@ -152,6 +152,15 @@ const statusAudience = async (companyId: number, whatsappId: number, groups: Arr
   // Converte os números para LID e descarta quem não tem LID conhecido.
   const lids = new Set<string>();
   const phones: string[] = [];
+  // A agenda vem primeiro: são as pessoas que o próprio WhatsApp do celular usaria no "Meus contatos".
+  const book = await q<{ lid: string | null; phone: string | null }>(
+    "SELECT lid, phone FROM wa_address_book WHERE whatsapp_id = $1 ORDER BY updated_at DESC LIMIT $2",
+    [whatsappId, STATUS_SEND_CAP * 2]
+  );
+  for (const row of book) {
+    if (row.lid) lids.add(row.lid);
+    else if (row.phone) phones.push(row.phone);
+  }
   for (const jid of [...fromGroups, ...extra]) {
     if (jid.endsWith("@lid")) lids.add(jid);
     else phones.push(jid.split("@")[0]);

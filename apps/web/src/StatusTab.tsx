@@ -105,6 +105,20 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
     }
   };
 
+  const [importing, setImporting] = useState(false);
+  const importBook = async () => {
+    setImporting(true);
+    try {
+      await api(`/api/connections/${conn.id}/address-book`, { method: "POST" });
+      tell("Importando", "A conexão vai reconectar e trazer a agenda do celular. Em 1 a 2 minutos o número aparece aqui.");
+      window.setTimeout(() => { void onSaved(); }, 60000);
+    } catch (err) {
+      tell("Não importou", err instanceof Error ? err.message : "Não foi possível importar a agenda", "bad");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const on = Boolean(conn.status_enabled);
   return (
     <div className="aff-prefs">
@@ -122,8 +136,11 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
         <button type="button" className={on ? "" : "is-solid"} disabled={saving} onClick={() => save(!on)}>{on ? "Desligar Status" : "Ligar Status"}</button>
       </div>
       <p className="aff-note">
-        Só texto, no formato curto, com a prévia do link. Quem vê: participantes dos {activeGroups} grupo(s) ativos desta conexão e os contatos da Base. O WhatsApp só mostra para quem tem o seu número salvo.
+        Só texto, no formato curto, com a prévia do link. Quem vê: os {Number(conn.address_book || 0)} contatos da agenda do seu celular, os participantes dos {activeGroups} grupo(s) ativos e os contatos da Base. O WhatsApp só mostra para quem também tem o seu número salvo.
       </p>
+      <div className="aff-conn__actions">
+        <button type="button" disabled={importing || conn.status !== "connected"} onClick={importBook}>{importing ? "Pedindo…" : Number(conn.address_book || 0) ? "Atualizar agenda do celular" : "Importar agenda do celular"}</button>
+      </div>
 
       <p><strong>Lojas</strong> (nenhuma marcada = todas as ativas)</p>
       <div className="aff-filters">

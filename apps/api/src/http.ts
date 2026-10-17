@@ -1029,7 +1029,8 @@ app.get("/api/connections", auth, async (req, res, next) => {
               (SELECT count(*)::int FROM groups g WHERE g.whatsapp_id = whatsapp_sessions.id AND g.enabled = true) AS active_groups,
               (SELECT count(*)::int FROM posts p WHERE p.whatsapp_id = whatsapp_sessions.id AND p.group_jid = 'status@broadcast' AND p.status = 'sent'
                  AND p.created_at >= (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo')) AS status_today,
-              (SELECT max(p.created_at) FROM posts p WHERE p.whatsapp_id = whatsapp_sessions.id AND p.group_jid = 'status@broadcast' AND p.status = 'sent') AS status_last_at
+              (SELECT max(p.created_at) FROM posts p WHERE p.whatsapp_id = whatsapp_sessions.id AND p.group_jid = 'status@broadcast' AND p.status = 'sent') AS status_last_at,
+              (SELECT count(*)::int FROM wa_address_book b WHERE b.whatsapp_id = whatsapp_sessions.id) AS address_book
        FROM whatsapp_sessions WHERE company_id = $1 ORDER BY id`,
       [companyId]
     );
@@ -1126,6 +1127,20 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
         statusPer
       ]
     );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/connections/:id/address-book", auth, async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    const id = Number(req.params.id);
+    const own = await one("SELECT id FROM whatsapp_sessions WHERE id = $1 AND company_id = $2", [id, companyId]);
+    if (!own) return res.status(404).json({ error: "Conexão não encontrada" });
+    const reply = await askWorker({ op: "import-address-book", sessionId: id }, 30);
+    if (!reply.ok) return res.status(400).json({ error: reply.error || "Não foi possível importar a agenda" });
     res.json({ ok: true });
   } catch (err) {
     next(err);

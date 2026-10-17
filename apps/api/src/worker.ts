@@ -132,6 +132,17 @@ if (redis) {
           void runDueDeals(companyId).catch(err => console.error("[worker] buscar agora", err));
           return reply({ ok: true, queued: true });
         }
+        if (job.op === "import-address-book") {
+          // Esquece o estado salvo da agenda e reconecta: o WhatsApp manda a agenda inteira de novo.
+          const [row] = await q<{ id: number; company_id: number; name: string }>("SELECT id, company_id, name FROM whatsapp_sessions WHERE id = $1", [Number(job.sessionId)]);
+          if (!row) return reply({ ok: false, error: "Conexão não encontrada" });
+          await q("UPDATE whatsapp_sessions SET address_book_synced_at = NULL WHERE id = $1", [row.id]);
+          await stopSession(row.id);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          await q("UPDATE whatsapp_sessions SET status = 'opening' WHERE id = $1", [row.id]);
+          await startSession(row);
+          return reply({ ok: true });
+        }
         if (job.op === "status-test") {
           const result = await statusTest(Number(job.companyId), Number(job.sessionId), String((job as { phone?: string }).phone || ""));
           return reply({ ok: true, ...result });

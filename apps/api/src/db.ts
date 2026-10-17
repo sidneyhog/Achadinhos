@@ -62,6 +62,16 @@ export const migrate = async () => {
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_cadence JSONB NOT NULL DEFAULT '{}';
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_per_cycle INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_stores JSONB NOT NULL DEFAULT '[]';
+    ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS address_book_synced_at TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS wa_address_book (
+      whatsapp_id INTEGER NOT NULL,
+      jid TEXT NOT NULL,
+      lid TEXT,
+      phone TEXT,
+      name TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (whatsapp_id, jid)
+    );
     ALTER TABLE posts ADD COLUMN IF NOT EXISTS whatsapp_id INTEGER;
     ALTER TABLE groups DROP CONSTRAINT IF EXISTS groups_company_id_group_jid_key;
     CREATE UNIQUE INDEX IF NOT EXISTS groups_company_whatsapp_jid ON groups (company_id, whatsapp_id, group_jid);
