@@ -640,7 +640,7 @@
 .aff-switchrow > div { min-width: 0; }
 .aff-switchrow strong { display: block; font-size: 14px; letter-spacing: -0.01em; }
 .aff-switchrow p, .aff-filtergrid p, .aff-hours p { margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
-.aff-config .aff-switch {
+.aff-config .aff-switch, .aff-connmodal .aff-switch {
   position: relative;
   flex: 0 0 40px;
   width: 40px;
@@ -651,8 +651,8 @@
   border-radius: 999px;
   background: #e2e8f0;
 }
-.aff-config .aff-switch:hover { transform: none; }
-.aff-config .aff-switch i {
+.aff-config .aff-switch:hover, .aff-connmodal .aff-switch:hover { transform: none; }
+.aff-config .aff-switch i, .aff-connmodal .aff-switch i {
   display: block;
   width: 18px;
   height: 18px;
@@ -661,8 +661,8 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
   transition: transform 0.15s ease;
 }
-.aff-config .aff-switch.is-on { background: #111827; }
-.aff-config .aff-switch.is-on i { transform: translateX(18px); }
+.aff-config .aff-switch.is-on, .aff-connmodal .aff-switch.is-on { background: #111827; }
+.aff-config .aff-switch.is-on i, .aff-connmodal .aff-switch.is-on i { transform: translateX(18px); }
 .aff-sendcard { grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; }
 .aff-sendcard img { width: 42px; height: 42px; object-fit: contain; }
 .aff-sendcard__time { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
