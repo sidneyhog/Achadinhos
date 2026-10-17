@@ -240,3 +240,17 @@ test("publicações: Status no formato curto, grupos no formato de sempre e pré
   assert.ok(isJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xe0])));
   assert.ok(!isJpeg(new Uint8Array([0x52, 0x49, 0x46, 0x46])));
 });
+
+test("Status: nunca passa de 10 linhas nem de 700 caracteres", async () => {
+  const { statusCaption, STATUS_MAX_CHARS } = await import("../src/deals/messages");
+  const offer = {
+    externalId: "X", marketplace: "amazon", url: "u", title: "Produto ".repeat(30),
+    priceCents: 10000, originalPriceCents: 20000, freeShipping: true, couponLabel: "CUPOM".repeat(30)
+  } as any;
+  const normal = statusCaption(offer, "https://amzn.to/abc");
+  assert.ok(normal.split("\n").length <= 10);
+  assert.ok(normal.length <= STATUS_MAX_CHARS);
+  const longo = statusCaption(offer, `https://www.awin1.com/cread.php?p=${"x".repeat(520)}`);
+  assert.ok(longo.length <= STATUS_MAX_CHARS, `ficou com ${longo.length}`);
+  assert.match(longo, /🛒 Garanta a sua aqui 👇/);
+});

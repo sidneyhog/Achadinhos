@@ -42,7 +42,10 @@ export const shortTitle = (title: string, max = 40) => {
   return (out || words.join(" ").slice(0, max)).toLocaleUpperCase("pt-BR");
 };
 
-/** Texto curto do Status (formato aprovado pelo cliente). */
+/** Limite de texto do Status do WhatsApp. */
+export const STATUS_MAX_CHARS = 700;
+
+/** Texto curto do Status (formato aprovado pelo cliente): no máximo 10 linhas e 700 caracteres. */
 export const statusCaption = (offer: DealOffer, url: string) => {
   const lines = [`🔥 ${shortTitle(offer.title)} 🔥`, ""];
   if (offer.priceCents > 0) {
@@ -54,8 +57,15 @@ export const statusCaption = (offer: DealOffer, url: string) => {
   if (discount > 0 && offer.freeShipping) lines.push(`📉 ${discount}% OFF + FRETE GRÁTIS 🚚`);
   else if (discount > 0) lines.push(`📉 ${discount}% OFF`);
   else if (offer.freeShipping) lines.push("🚚 FRETE GRÁTIS");
-  if (offer.couponLabel) lines.push(`🎟️ Cupom: ${offer.couponLabel}`);
+  if (offer.couponLabel) lines.push(`🎟️ Cupom: ${String(offer.couponLabel).slice(0, 40)}`);
   lines.push("", "🛒 Garanta a sua aqui 👇", url, "", "⏳ Oferta sujeita a alteração.");
+  // Status aceita no máximo ~700 caracteres: com link muito longo, tira primeiro o aviso final e depois o cupom.
+  const fit = (list: string[]) => list.join("\n").length <= STATUS_MAX_CHARS;
+  if (!fit(lines)) lines.splice(lines.length - 2, 2);
+  if (!fit(lines)) {
+    const coupon = lines.findIndex(line => line.startsWith("🎟️"));
+    if (coupon >= 0) lines.splice(coupon, 1);
+  }
   return lines.join("\n");
 };
 
