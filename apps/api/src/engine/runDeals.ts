@@ -593,10 +593,9 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           try {
             pub.recipients ??= await statusAudience(company.id, pub.id, pub.groups);
             if (!pub.recipients.length) throw new Error("ninguém para ver: ative um grupo nesta conexão ou traga contatos para a Base");
-            // Formato curto, com a foto do produto; sem foto, vai o texto com prévia do link.
-            const image = await imageOf();
-            const preview = image ? undefined : await previewOf();
-            const send = (to: string[]) => sendStatus(pub.id, to, image ? Buffer.from(image) : null, statusCaption(offer, published), preview);
+            // Status só de texto (formato curto); a foto do produto aparece no cartão de prévia do link.
+            const preview = await previewOf();
+            const send = (to: string[]) => sendStatus(pub.id, to, null, statusCaption(offer, published), preview);
             try {
               await send(pub.recipients);
             } catch (err) {

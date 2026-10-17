@@ -105,7 +105,7 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
         <button type="button" className={on ? "" : "is-solid"} disabled={saving} onClick={() => save(!on)}>{on ? "Desligar Status" : "Ligar Status"}</button>
       </div>
       <p className="aff-note">
-        Formato curto, com a foto do produto. Quem vê: participantes dos {activeGroups} grupo(s) ativos desta conexão e os contatos da Base. O WhatsApp só mostra para quem tem o seu número salvo.
+        Só texto, no formato curto, com a prévia do link. Quem vê: participantes dos {activeGroups} grupo(s) ativos desta conexão e os contatos da Base. O WhatsApp só mostra para quem tem o seu número salvo.
       </p>
 
       <p><strong>Lojas</strong> (nenhuma marcada = todas as ativas)</p>
