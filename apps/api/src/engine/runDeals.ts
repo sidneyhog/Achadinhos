@@ -15,7 +15,7 @@ import { searchRakuten } from "../deals/searchRakuten";
 import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
-import { STATUS_JID, clampStatusPace, statusAllowed, statusRecipients } from "../deals/statusPolicy";
+import { STATUS_JID, STATUS_LIMITS, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
   resolveMlTracking,
@@ -133,6 +133,19 @@ const loadStatusRecipients = async (whatsappId: number, groups: Array<{ group_ji
     }
   }
   return statusRecipients(participants, [creds?.meJid || "", creds?.meLid || ""]);
+};
+
+/** Quem vê o Status: participantes dos grupos da conexão + contatos da Base (sem bloqueados), sem repetir. */
+const statusAudience = async (companyId: number, whatsappId: number, groups: Array<{ group_jid: string }>) => {
+  const fromGroups = groups.length ? await loadStatusRecipients(whatsappId, groups) : [];
+  const contacts = await q<{ phone: string }>(
+    "SELECT phone FROM contacts WHERE company_id = $1 AND blocked = false AND anonymized_at IS NULL AND phone ~ '^[0-9]{10,15}$' ORDER BY updated_at DESC LIMIT $2",
+    [companyId, STATUS_LIMITS.maxRecipients]
+  );
+  const own = getLive(whatsappId)?.client;
+  const creds = own?.getCredentials?.() || own?.auth?.getCredentials?.() || null;
+  const extra = statusRecipients(contacts.map(row => ({ jid: `${row.phone}@s.whatsapp.net` })), [creds?.meJid || ""]);
+  return [...new Set([...fromGroups, ...extra])].slice(0, STATUS_LIMITS.maxRecipients);
 };
 
 const AWIN: Record<string, string> = {
@@ -306,9 +319,13 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
       posts_per_cycle: number | null;
       status_enabled: boolean;
       status_per_day: number | null;
-      status_gap_minutes: number | null;
+      status_cadence: Record<string, number> | null;
+      status_per_cycle: number | null;
+      status_stores: string[] | null;
     }>(
-      "SELECT id, stores, status, send_cadence, interval_seconds, posts_per_cycle, status_enabled, status_per_day, status_gap_minutes FROM whatsapp_sessions WHERE company_id = $1 AND enabled = true",
+      `SELECT id, stores, status, send_cadence, interval_seconds, posts_per_cycle,
+              status_enabled, status_per_day, status_cadence, status_per_cycle, status_stores
+       FROM whatsapp_sessions WHERE company_id = $1 AND enabled = true`,
       [company.id]
     );
     const groups = await q<{ group_jid: string; name: string; categories: string; whatsapp_id: number | null; enabled: boolean }>(
@@ -325,32 +342,54 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
       lastSent: Map<string, number>;
       posted: Map<string, number>;
       failed: boolean;
-      status: { perDay: number; gapMinutes: number; sentToday: number; lastAt: number | null; recipients: string[] | null; failed: boolean } | null;
+    }> = [];
+    // Status: publicador próprio da conexão, com lojas, intervalo por loja, ofertas por vez e máximo por dia.
+    const statusPubs: Array<{
+      id: number;
+      stores: string[];
+      groups: Array<{ group_jid: string }>;
+      cadence: ReturnType<typeof readSendCadence>;
+      intervalMs: number;
+      perCycle: number;
+      perDay: number;
+      sentToday: number;
+      lastSent: Map<string, number>;
+      posted: Map<string, number>;
+      recipients: string[] | null;
+      failed: boolean;
     }> = [];
     for (const session of sessions) {
       if (session.status !== "connected" || !getLive(session.id)) continue;
       const mine = groups.filter(group => Number(group.whatsapp_id) === session.id);
+      if (session.status_enabled) {
+        const statusRows = await q<{ marketplace: string; last_at: string; today: string }>(
+          `SELECT marketplace, max(created_at) AS last_at,
+                  count(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'))::text AS today
+           FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' GROUP BY marketplace`,
+          [company.id, session.id, STATUS_JID]
+        );
+        const ownStatus = session.status_cadence && Object.keys(session.status_cadence).length ? session.status_cadence : session.send_cadence && Object.keys(session.send_cadence).length ? session.send_cadence : current.send_cadence;
+        statusPubs.push({
+          id: session.id,
+          stores: session.status_stores || [],
+          groups: mine,
+          cadence: readSendCadence(ownStatus),
+          intervalMs: Math.min(180, Math.max(5, Number(session.interval_seconds ?? current.interval_seconds) || 20)) * 1000,
+          perCycle: Math.min(5, Math.max(1, Number(session.status_per_cycle) || 1)),
+          perDay: Math.min(STATUS_LIMITS.maxPerDay, Math.max(1, Number(session.status_per_day) || STATUS_LIMITS.defaultPerDay)),
+          sentToday: statusRows.reduce((sum, row) => sum + Number(row.today || 0), 0),
+          lastSent: new Map(statusRows.map(row => [row.marketplace, new Date(row.last_at).getTime()])),
+          posted: new Map(),
+          recipients: null,
+          failed: false
+        });
+      }
       if (!mine.length) continue;
       const own = session.send_cadence && Object.keys(session.send_cadence).length ? session.send_cadence : current.send_cadence;
       const lastRows = await q<{ marketplace: string; last_at: string }>(
-        "SELECT marketplace, max(created_at) AS last_at FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND status = 'sent' GROUP BY marketplace",
-        [company.id, session.id]
+        "SELECT marketplace, max(created_at) AS last_at FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND status = 'sent' AND group_jid <> $3 GROUP BY marketplace",
+        [company.id, session.id, STATUS_JID]
       );
-      let status = null;
-      if (session.status_enabled) {
-        const [today] = await q<{ count: string; last_at: string | null }>(
-          `SELECT count(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'))::text AS count, max(created_at) AS last_at
-           FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent'`,
-          [company.id, session.id, STATUS_JID]
-        );
-        status = {
-          ...clampStatusPace({ perDay: session.status_per_day, gapMinutes: session.status_gap_minutes }),
-          sentToday: Number(today?.count || 0),
-          lastAt: today?.last_at ? new Date(today.last_at).getTime() : null,
-          recipients: null,
-          failed: false
-        };
-      }
       publishers.push({
         id: session.id,
         stores: session.stores || [],
@@ -360,16 +399,15 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         perCycle: Math.min(5, Math.max(1, Number(session.posts_per_cycle ?? current.posts_per_cycle) || 1)),
         lastSent: new Map(lastRows.map(row => [row.marketplace, new Date(row.last_at).getTime()])),
         posted: new Map(),
-        failed: false,
-        status
+        failed: false
       });
     }
     const bots = await q<{ token_enc: string; enabled: boolean; stores: string[]; chats: Array<{ chatId: string; enabled?: boolean; stores?: string[]; categories?: string; title?: string }> }>(
       "SELECT token_enc, enabled, stores, chats FROM telegram_bots WHERE company_id = $1 AND enabled = true",
       [company.id]
     );
-    if (!publishers.length && !bots.length) {
-      await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, "Ative um grupo na conexão que deve publicar, ou conecte um bot do Telegram"]);
+    if (!publishers.length && !bots.length && !statusPubs.length) {
+      await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, "Ative um grupo ou o Status na conexão que deve publicar, ou conecte um bot do Telegram"]);
       return;
     }
 
@@ -406,7 +444,13 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
         const last = botLast.get(watch.marketplace) || 0;
         return !last || Date.now() - last >= cadenceSeconds(companyCadence, watch.marketplace) * 1000;
       });
-      if (!waDue && !botDue) continue;
+      const statusDue = statusPubs.some(pub => {
+        if (pub.sentToday >= pub.perDay) return false;
+        if (pub.stores.length && !pub.stores.includes(watch.marketplace)) return false;
+        const last = pub.lastSent.get(watch.marketplace) || 0;
+        return !last || Date.now() - last >= cadenceSeconds(pub.cadence, watch.marketplace) * 1000;
+      });
+      if (!waDue && !botDue && !statusDue) continue;
       try {
         const offers = await fetchOffers(watch.marketplace, watch.query, current, stores, ml);
         for (const offer of offers) {
@@ -459,6 +503,17 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
             published = offer.url;
           }
         }
+        // Imagem e prévia montadas uma vez por oferta e reaproveitadas em todos os grupos e no Status.
+        let jpeg: Uint8Array | undefined;
+        let jpegLoaded = false;
+        const imageOf = async () => {
+          if (!jpegLoaded) {
+            jpeg = await loadJpeg(offer.imageUrl);
+            jpegLoaded = true;
+          }
+          return jpeg;
+        };
+        const previewOf = async (): Promise<LinkPreview> => ({ ...previewText(offer), thumbnail: await imageOf() });
         for (const pub of publishers) {
           if (pub.failed) continue;
           if ((pub.posted.get(marketplace) || 0) >= pub.perCycle) continue;
@@ -467,18 +522,6 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           if (last && Date.now() - last < cadenceSeconds(pub.cadence, marketplace) * 1000) continue;
           const matching = pub.groups.filter(group => textMatches(offer, group.categories));
           const destinations = (matching.length ? matching : pub.groups).slice(0, 40);
-          let reachedGroup = false;
-          // Imagem e prévia montadas uma vez por oferta e reaproveitadas em todos os grupos e no Status.
-          let jpeg: Uint8Array | undefined;
-          let jpegLoaded = false;
-          const imageOf = async () => {
-            if (!jpegLoaded) {
-              jpeg = await loadJpeg(offer.imageUrl);
-              jpegLoaded = true;
-            }
-            return jpeg;
-          };
-          const previewOf = async (): Promise<LinkPreview> => ({ ...previewText(offer), thumbnail: await imageOf() });
           for (const group of destinations) {
             const since = await q(
               `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $3 AND external_id = $4) OR url = $5) LIMIT 1`,
@@ -495,7 +538,6 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
                 [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, group.group_jid, group.name, token, pub.id]
               );
               sent += 1;
-              reachedGroup = true;
               pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
               pub.lastSent.set(marketplace, Date.now());
               await delay(pub.intervalMs);
@@ -509,35 +551,42 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
               break;
             }
           }
-          // Status: só o que acabou de sair nos grupos, dentro do limite próprio da conexão.
-          const st = pub.status;
-          if (reachedGroup && st && !st.failed && statusAllowed({ ...st, now: Date.now() })) {
-            const dup = await q(
-              `SELECT id FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' AND created_at > now() - interval '24 hours' AND marketplace = $4 AND external_id = $5 LIMIT 1`,
-              [company.id, pub.id, STATUS_JID, offer.marketplace, offer.externalId]
+        }
+        for (const pub of statusPubs) {
+          if (pub.failed || pub.sentToday >= pub.perDay) continue;
+          if ((pub.posted.get(marketplace) || 0) >= pub.perCycle) continue;
+          if (pub.stores.length && !pub.stores.includes(offer.marketplace)) continue;
+          const last = pub.lastSent.get(marketplace) || 0;
+          if (last && Date.now() - last < cadenceSeconds(pub.cadence, marketplace) * 1000) continue;
+          const repeated = await q(
+            `SELECT id FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $4 AND external_id = $5) OR url = $6) LIMIT 1`,
+            [company.id, pub.id, STATUS_JID, offer.marketplace, offer.externalId, published]
+          );
+          if (repeated.length) continue;
+          try {
+            pub.recipients ??= await statusAudience(company.id, pub.id, pub.groups);
+            if (!pub.recipients.length) throw new Error("ninguém para ver: ative um grupo nesta conexão ou traga contatos para a Base");
+            // Formato curto, com a foto do produto; sem foto, vai o texto com prévia do link.
+            const image = await imageOf();
+            await sendStatus(pub.id, pub.recipients, image ? Buffer.from(image) : null, statusCaption(offer, published), image ? undefined : await previewOf());
+            await q(
+              `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Status','sent',$9,$10)`,
+              [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, crypto.randomBytes(8).toString("hex"), pub.id]
             );
-            if (!dup.length) {
-              try {
-                st.recipients ??= await loadStatusRecipients(pub.id, pub.groups);
-                // Status no formato curto, com a foto do produto; sem foto, vai o texto com prévia do link.
-                const image = await imageOf();
-                await sendStatus(pub.id, st.recipients, image ? Buffer.from(image) : null, statusCaption(offer, published), image ? undefined : await previewOf());
-                await q(
-                  `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Status','sent',$9,$10)`,
-                  [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, crypto.randomBytes(8).toString("hex"), pub.id]
-                );
-                sent += 1;
-                st.sentToday += 1;
-                st.lastAt = Date.now();
-              } catch (err) {
-                st.failed = true;
-                await q(
-                  `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, group_jid, status, error, whatsapp_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'error',$8,$9)`,
-                  [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, offer.url, STATUS_JID, `Status: ${String((err as Error).message)}`.slice(0, 400), pub.id]
-                );
-              }
-            }
+            sent += 1;
+            pub.sentToday += 1;
+            pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
+            pub.lastSent.set(marketplace, Date.now());
+            await delay(pub.intervalMs);
+          } catch (err) {
+            pub.failed = true;
+            const message = `Status: ${String((err as Error).message)}`.slice(0, 400);
+            await q(
+              `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, group_jid, group_name, status, error, whatsapp_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'Status','error',$8,$9)`,
+              [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, offer.url, STATUS_JID, message, pub.id]
+            );
+            await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, message]);
           }
         }
         if (!publishers.length || publishers.some(pub => !pub.failed)) {

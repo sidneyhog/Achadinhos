@@ -1025,8 +1025,11 @@ app.get("/api/connections", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const sessions = await q(
       `SELECT id, name, status, phone, qr, enabled, stores, selected, last_error, created_at, connected_at, qr_at,
-              send_cadence, interval_seconds, posts_per_cycle, status_enabled, status_per_day, status_gap_minutes,
-              (SELECT count(*)::int FROM groups g WHERE g.whatsapp_id = whatsapp_sessions.id AND g.enabled = true) AS active_groups
+              send_cadence, interval_seconds, posts_per_cycle, status_enabled, status_per_day, status_gap_minutes, status_cadence, status_per_cycle, status_stores,
+              (SELECT count(*)::int FROM groups g WHERE g.whatsapp_id = whatsapp_sessions.id AND g.enabled = true) AS active_groups,
+              (SELECT count(*)::int FROM posts p WHERE p.whatsapp_id = whatsapp_sessions.id AND p.group_jid = 'status@broadcast' AND p.status = 'sent'
+                 AND p.created_at >= (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo')) AS status_today,
+              (SELECT max(p.created_at) FROM posts p WHERE p.whatsapp_id = whatsapp_sessions.id AND p.group_jid = 'status@broadcast' AND p.status = 'sent') AS status_last_at
        FROM whatsapp_sessions WHERE company_id = $1 ORDER BY id`,
       [companyId]
     );
@@ -1079,6 +1082,18 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
     const posts = req.body?.postsPerCycle == null ? null : Math.min(5, Math.max(1, Math.round(Number(req.body.postsPerCycle) || 1)));
     const statusOn = typeof req.body?.statusEnabled === "boolean" ? req.body.statusEnabled : null;
     const statusPace = clampStatusPace({ perDay: req.body?.statusPerDay, gapMinutes: req.body?.statusGapMinutes });
+    // Status com os mesmos controles dos grupos: lojas, intervalo por loja (mín. 15 s) e ofertas por vez.
+    const statusStores = Array.isArray(req.body?.statusStores) ? JSON.stringify(req.body.statusStores.map(String).slice(0, 30)) : null;
+    let statusCadence: string | null = null;
+    if (req.body?.statusCadence && typeof req.body.statusCadence === "object") {
+      const clean: Record<string, number> = {};
+      for (const [store, value] of Object.entries(req.body.statusCadence as Record<string, unknown>).slice(0, 30)) {
+        const seconds = Math.round(Number(value));
+        if (Number.isFinite(seconds)) clean[String(store)] = Math.min(86400, Math.max(15, seconds));
+      }
+      statusCadence = JSON.stringify(clean);
+    }
+    const statusPer = req.body?.statusPerCycle == null ? null : Math.min(5, Math.max(1, Math.round(Number(req.body.statusPerCycle) || 1)));
     await q(
       `UPDATE whatsapp_sessions SET
          enabled = COALESCE($3, enabled),
@@ -1089,7 +1104,10 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
          posts_per_cycle = COALESCE($8, posts_per_cycle),
          status_enabled = COALESCE($9, status_enabled),
          status_per_day = COALESCE($10, status_per_day),
-         status_gap_minutes = COALESCE($11, status_gap_minutes)
+         status_gap_minutes = COALESCE($11, status_gap_minutes),
+         status_stores = COALESCE($12::jsonb, status_stores),
+         status_cadence = COALESCE($13::jsonb, status_cadence),
+         status_per_cycle = COALESCE($14, status_per_cycle)
        WHERE id = $1 AND company_id = $2`,
       [
         Number(req.params.id),
@@ -1102,7 +1120,10 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
         posts,
         statusOn,
         req.body?.statusPerDay == null ? null : statusPace.perDay,
-        req.body?.statusGapMinutes == null ? null : statusPace.gapMinutes
+        req.body?.statusGapMinutes == null ? null : statusPace.gapMinutes,
+        statusStores,
+        statusCadence,
+        statusPer
       ]
     );
     res.json({ ok: true });

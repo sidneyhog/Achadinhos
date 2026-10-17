@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { api, getToken } from "./api";
 import type { Session } from "./App";
 import { Mark } from "./Mark";
+import { StatusTab } from "./StatusTab";
 import { go, PANEL_PATH, usePath } from "./route";
 
 const STORES = [
@@ -829,7 +830,7 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
   const setView = (id: View) => go(id === "config" ? "/configuracoes/envio" : PANEL_PATH[id]);
   const configTab = path.split("/")[2] && ["geral", "envio", "filtros", "horarios", "equipe", "logs"].includes(path.split("/")[2]) ? path.split("/")[2] : "envio";
   const setConfigTab = (id: string) => go(`/configuracoes/${id}`);
-  const connMatch = path.match(/^\/conexoes\/(\d+)\/(conexao|lojas|grupos)$/);
+  const connMatch = path.match(/^\/conexoes\/(\d+)\/(conexao|lojas|grupos|status)$/);
   const botMatch = path.match(/^\/conexoes\/bot\/(\d+)\/(bot|lojas|chats)$/);
   const openConn = connMatch ? Number(connMatch[1]) : null;
   const connTab = connMatch?.[2] || "conexao";
@@ -1037,16 +1038,6 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
   const saveConnStores = async (id: number, stores: string[]) => {
     await api(`/api/connections/${id}`, { method: "PATCH", body: JSON.stringify({ stores }) });
     setConnections((rows) => rows.map((item) => item.id === id ? { ...item, stores } : item));
-  };
-
-  const patchStatus = async (id: number, patch: Record<string, unknown>, done: string) => {
-    try {
-      await api(`/api/connections/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-      await reload();
-      tell("Salvo", done);
-    } catch (err) {
-      tell("Não salvou", err instanceof Error ? err.message : "Não foi possível gravar o Status", "bad");
-    }
   };
 
   const patchBot = async (id: number, patch: Record<string, unknown>) => {
@@ -1668,7 +1659,7 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
                       </div>
                       <div className="aff-connmodal">
                         <div className="aff-tabs">
-                          {[["conexao", "Geral"], ["lojas", "Lojas"], ["grupos", "Grupos"]].map(([id, label]) => (
+                          {[["conexao", "Geral"], ["lojas", "Lojas"], ["grupos", "Grupos"], ["status", item.status_enabled ? "Status ●" : "Status"]].map(([id, label]) => (
                             <button key={id} type="button" className={connTab === id ? "is-on" : ""} onClick={() => { setConnTab(id); if (id === "grupos") loadGroups(item.id).catch((err) => tell("Não listou", err instanceof Error ? err.message : "Não foi possível listar os grupos", "bad")); }}>{label}</button>
                           ))}
                         </div>
@@ -1716,16 +1707,9 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
                             ) : null}
                             <label className="aff-waname">Nome<input value={connName} onChange={(event) => setConnName(event.target.value)} /></label>
                             <div className="aff-switchrow">
-                              <div><strong>Publicar também no Status</strong><p>As ofertas que saírem nos grupos desta conexão vão para o Status, que só os participantes desses grupos veem.</p></div>
-                              <button type="button" className={`aff-switch${item.status_enabled ? " is-on" : ""}`} onClick={() => patchStatus(item.id, { statusEnabled: !item.status_enabled }, item.status_enabled ? "O Status desta conexão foi desligado." : "As ofertas também vão para o Status.")}><i /></button>
+                              <div><strong>Status do WhatsApp: {item.status_enabled ? "ligado" : "desligado"}</strong><p>Lojas, intervalo, ofertas por vez e limite por dia ficam na aba Status.</p></div>
+                              <button type="button" onClick={() => setConnTab("status")}>Abrir Status</button>
                             </div>
-                            {item.status_enabled ? (
-                              <article className="aff-pref">
-                                <label>No máximo por dia<input type="number" min="1" max="30" value={item.status_per_day ?? 6} onChange={(event) => setConnections((rows) => rows.map((row) => row.id === item.id ? { ...row, status_per_day: event.target.value === "" ? "" : Number(event.target.value) } : row))} onBlur={(event) => patchStatus(item.id, { statusPerDay: Number(event.target.value) || 6 }, "O limite diário do Status foi gravado.")} /></label>
-                                <label>Minutos entre um Status e outro<input type="number" min="15" max="720" value={item.status_gap_minutes ?? 60} onChange={(event) => setConnections((rows) => rows.map((row) => row.id === item.id ? { ...row, status_gap_minutes: event.target.value === "" ? "" : Number(event.target.value) } : row))} onBlur={(event) => patchStatus(item.id, { statusGapMinutes: Number(event.target.value) || 60 }, "O intervalo do Status foi gravado.")} /></label>
-                                <small>Até 30 por dia, com pelo menos 15 minutos entre eles, para não poluir o Status.</small>
-                              </article>
-                            ) : null}
                             <div className="aff-wafoot">
                               <button type="button" onClick={async () => {
                                 try {
@@ -1835,6 +1819,19 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
                             {!listed.length && !book?.loading ? <p className="aff-note">{online ? "Nenhum grupo encontrado nesta conta ainda." : "Gere o QR, leia no WhatsApp e volte nesta aba."}</p> : null}
                             {listed.length && !visible.length ? <p className="aff-note">Nenhum grupo com “{query}”.</p> : null}
                           </div>
+                        ) : null}
+                        {connTab === "status" ? (
+                          <StatusTab
+                            key={item.id}
+                            conn={item}
+                            stores={STORES.filter((store) => stores.find((row) => row.marketplace === store.id)?.enabled)}
+                            posts={posts}
+                            activeGroups={Number(item.active_groups || 0)}
+                            ago={ago}
+                            speakWait={speakWait}
+                            onSaved={reload}
+                            tell={tell}
+                          />
                         ) : null}
                       </div>
                     </div>
