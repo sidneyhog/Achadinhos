@@ -3,7 +3,8 @@ import axios from "axios";
 import { audit, q } from "../db";
 import { withLock } from "../locks";
 import { decrypt } from "../secrets";
-import { sendImage, sendStatus, sendText, getLive } from "../zapo/session";
+import { getLive, sendStatus, sendTextWithPreview, type LinkPreview } from "../zapo/session";
+import { groupCaption, isJpeg, jpegCandidates, previewText, statusCaption } from "../deals/messages";
 import { searchMercadoLivre, offerEndsSoonText } from "../deals/searchMercadoLivre";
 import { searchAmazon } from "../deals/searchAmazon";
 import { amazonOffersFromLinks } from "../deals/amazonLinks";
@@ -20,7 +21,7 @@ import {
   resolveMlTracking,
   stripMlTracking
 } from "../deals/mlAffiliate";
-import { DealOffer, formatDealBRL, marketplaceLabel, scoreOffer } from "../deals/types";
+import { DealOffer, marketplaceLabel, scoreOffer } from "../deals/types";
 
 type Setting = {
   company_id: number;
@@ -79,19 +80,22 @@ const secretsOf = (row: StoreRow): Record<string, string> => {
   }
 };
 
-const caption = (offer: DealOffer, url: string) => {
-  const lines = ["🔥 OFERTA ENCONTRADA", "", `📦 ${offer.title}`];
-  const priceLines: string[] = [];
-  const hasOldPrice = Boolean(offer.originalPriceCents && offer.priceCents > 0 && offer.originalPriceCents > offer.priceCents);
-  if (hasOldPrice) priceLines.push(`💰 De: ${formatDealBRL(offer.originalPriceCents || 0)}`);
-  if (offer.priceCents > 0) priceLines.push(`🔥 Por: ${formatDealBRL(offer.priceCents)}`);
-  const discount = offer.discountPercent || (hasOldPrice ? Math.round((1 - offer.priceCents / (offer.originalPriceCents || offer.priceCents)) * 100) : 0);
-  if (discount > 0) priceLines.push("", `📉 Desconto: ${discount}%`);
-  if (offer.couponLabel) priceLines.push(`🎟️ Cupom: ${offer.couponLabel}`);
-  if (offer.freeShipping) priceLines.push("🚚 Frete grátis");
-  if (priceLines.length) lines.push("", ...priceLines);
-  lines.push("", `🏪 ${marketplaceLabel(offer.marketplace)}`, "", "🛒 Comprar:", url, "", "⏳ Oferta sujeita a alteração sem aviso.");
-  return lines.join("\n");
+/** Texto dos grupos e do Telegram (formato de sempre). */
+const caption = groupCaption;
+
+/** Baixa a imagem do produto em JPEG (a prévia do link e o Status exigem JPEG). Devolve undefined se não conseguir. */
+const loadJpeg = async (imageUrl?: string): Promise<Uint8Array | undefined> => {
+  if (!imageUrl || !/^https:\/\//i.test(imageUrl)) return undefined;
+  for (const candidate of jpegCandidates(imageUrl)) {
+    try {
+      const response = await axios.get(candidate, { responseType: "arraybuffer", timeout: 15000, maxContentLength: 4 * 1024 * 1024 });
+      const bytes = new Uint8Array(response.data);
+      if (isJpeg(bytes)) return bytes;
+    } catch {
+      /* tenta o próximo formato */
+    }
+  }
+  return undefined;
 };
 
 const passes = (offer: DealOffer, setting: Setting) => {
@@ -464,6 +468,17 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           const matching = pub.groups.filter(group => textMatches(offer, group.categories));
           const destinations = (matching.length ? matching : pub.groups).slice(0, 40);
           let reachedGroup = false;
+          // Imagem e prévia montadas uma vez por oferta e reaproveitadas em todos os grupos e no Status.
+          let jpeg: Uint8Array | undefined;
+          let jpegLoaded = false;
+          const imageOf = async () => {
+            if (!jpegLoaded) {
+              jpeg = await loadJpeg(offer.imageUrl);
+              jpegLoaded = true;
+            }
+            return jpeg;
+          };
+          const previewOf = async (): Promise<LinkPreview> => ({ ...previewText(offer), thumbnail: await imageOf() });
           for (const group of destinations) {
             const since = await q(
               `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $3 AND external_id = $4) OR url = $5) LIMIT 1`,
@@ -472,16 +487,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
             if (since.length) continue;
             const token = crypto.randomBytes(8).toString("hex");
             try {
-              if (offer.imageUrl) {
-                try {
-                  const image = await axios.get(offer.imageUrl, { responseType: "arraybuffer", timeout: 15000, maxContentLength: 4 * 1024 * 1024 });
-                  await sendImage(pub.id, group.group_jid, Buffer.from(image.data), caption(offer, published));
-                } catch {
-                  await sendText(pub.id, group.group_jid, caption(offer, published));
-                }
-              } else {
-                await sendText(pub.id, group.group_jid, caption(offer, published));
-              }
+              // Só texto: a imagem chega pelo cartão de prévia do link e não pesa o celular de quem está no grupo.
+              await sendTextWithPreview(pub.id, group.group_jid, caption(offer, published), await previewOf());
               await q(
                 `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sent',$10,$11)`,
@@ -512,16 +519,9 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
             if (!dup.length) {
               try {
                 st.recipients ??= await loadStatusRecipients(pub.id, pub.groups);
-                let media: Buffer | null = null;
-                if (offer.imageUrl) {
-                  try {
-                    const image = await axios.get(offer.imageUrl, { responseType: "arraybuffer", timeout: 15000, maxContentLength: 4 * 1024 * 1024 });
-                    media = Buffer.from(image.data);
-                  } catch {
-                    media = null;
-                  }
-                }
-                await sendStatus(pub.id, st.recipients, media, caption(offer, published));
+                // Status no formato curto, com a foto do produto; sem foto, vai o texto com prévia do link.
+                const image = await imageOf();
+                await sendStatus(pub.id, st.recipients, image ? Buffer.from(image) : null, statusCaption(offer, published), image ? undefined : await previewOf());
                 await q(
                   `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Status','sent',$9,$10)`,

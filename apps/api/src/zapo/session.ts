@@ -173,12 +173,30 @@ export const sendImage = async (whatsappId: number, jid: string, media: Buffer, 
   await session.client.message.send(jid, { type: "image", media, mimetype: "image/jpeg", caption });
 };
 
+/** Prévia do link montada por nós: evita o WhatsApp buscar a página e garante a foto do produto. */
+export type LinkPreview = { title: string; description: string; thumbnail?: Uint8Array };
+
+const textWithPreview = (text: string, preview?: LinkPreview) => ({
+  type: "text",
+  text,
+  linkPreview: preview
+    ? { title: preview.title, description: preview.description, ...(preview.thumbnail ? { thumbnail: { bytes: preview.thumbnail } } : {}) }
+    : false
+});
+
+/** Texto com cartão de prévia do link: a imagem aparece sem anexar foto (não ocupa a memória de quem recebe). */
+export const sendTextWithPreview = async (whatsappId: number, jid: string, text: string, preview?: LinkPreview) => {
+  const session = live.get(whatsappId);
+  if (!session) throw new Error("WhatsApp desconectado");
+  await session.client.message.send(jid, textWithPreview(text, preview));
+};
+
 /** Publica no Status (status@broadcast); o WhatsApp só entrega a quem está em `recipients`. */
-export const sendStatus = async (whatsappId: number, recipients: string[], media: Buffer | null, caption: string) => {
+export const sendStatus = async (whatsappId: number, recipients: string[], media: Buffer | null, caption: string, preview?: LinkPreview) => {
   const session = live.get(whatsappId);
   if (!session) throw new Error("WhatsApp desconectado");
   if (!session.client.status?.send) throw new Error("Esta versão do zapo-js não publica Status");
   if (!recipients.length) throw new Error("Status sem destinatários: os grupos da conexão não têm participantes");
-  const content = media ? { type: "image", media, mimetype: "image/jpeg", caption } : caption;
+  const content = media ? { type: "image", media, mimetype: "image/jpeg", caption } : textWithPreview(caption, preview);
   await session.client.status.send({ content, recipients });
 };

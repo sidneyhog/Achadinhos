@@ -212,3 +212,31 @@ test("chave da extensão: formato, hash estável e cookie com sessão do ML", as
   assert.equal(isMlSessionCookie("_d2id=abc; nsa_rotok=x.y.z"), false, "sem ssid não é sessão");
   assert.equal(isMlSessionCookie(`ssid=1; x=${"a".repeat(20_001)}`), false, "texto gigante é recusado");
 });
+
+test("publicações: Status no formato curto, grupos no formato de sempre e prévia do link", async () => {
+  const { groupCaption, statusCaption, shortTitle, previewText, jpegCandidates, isJpeg } = await import("../src/deals/messages");
+  const offer = {
+    externalId: "MLB1", marketplace: "ml", url: "https://x", title: "Air Fryer Philco Pfr2200p 6,5l 1500w Preto 127v",
+    priceCents: 34990, originalPriceCents: 59990, freeShipping: true
+  } as any;
+  assert.equal(shortTitle(offer.title), "AIR FRYER PHILCO 6,5L 1500W");
+  const status = statusCaption(offer, "https://meli.la/abc").replace(/ /g, " ");
+  assert.equal(status, [
+    "🔥 AIR FRYER PHILCO 6,5L 1500W 🔥", "",
+    "💰 De R$ 599,90 por R$ 349,90",
+    "📉 42% OFF + FRETE GRÁTIS 🚚", "",
+    "🛒 Garanta a sua aqui 👇", "https://meli.la/abc", "",
+    "⏳ Oferta sujeita a alteração."
+  ].join("\n"));
+  const semDe = statusCaption({ ...offer, originalPriceCents: undefined, freeShipping: false, couponLabel: "10OFF" }, "u").replace(/ /g, " ");
+  assert.match(semDe, /💰 Por apenas R\$ 349,90/);
+  assert.match(semDe, /🎟️ Cupom: 10OFF/);
+  assert.doesNotMatch(semDe, /📉/);
+  const group = groupCaption(offer, "https://meli.la/abc");
+  assert.ok(group.startsWith("🔥 OFERTA ENCONTRADA\n\n📦 Air Fryer Philco"));
+  assert.match(group, /🛒 Comprar:\nhttps:\/\/meli\.la\/abc/);
+  assert.equal(previewText(offer).description.replace(/ /g, " "), "Por R$ 349,90 · 42% OFF · Frete grátis");
+  assert.deepEqual(jpegCandidates("https://http2.mlstatic.com/D_Q_NP_1-O.webp"), ["https://http2.mlstatic.com/D_Q_NP_1-O.webp", "https://http2.mlstatic.com/D_Q_NP_1-O.jpg"]);
+  assert.ok(isJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xe0])));
+  assert.ok(!isJpeg(new Uint8Array([0x52, 0x49, 0x46, 0x46])));
+});
