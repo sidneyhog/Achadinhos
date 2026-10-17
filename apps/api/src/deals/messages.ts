@@ -29,6 +29,8 @@ const VOLTAGE = /^(bivolt|\d{3}v|\d{3}\/\d{3}v?)$/i;
 const MODEL_CODE = /^(?=.*\d)(?=.*[a-z])[a-z0-9-]{5,}$/i; // ex.: Pfr2200p, SM-A155M
 const UNIT = /^\d+([.,]\d+)?(l|ml|kg|g|w|gb|tb|mah|pol|"|cm|mm|m)$/i; // 6,5l, 128gb, 1200w: não é código
 
+const DANGLING = /^(com|sem|para|pra|p\/|de|da|do|das|dos|e|em|no|na|ou|a|o|à|ao|até|por|kit|\+|-|–|\|)$/i;
+
 /** Título curto em maiúsculas para o Status: sem código de modelo, voltagem e cor, até ~40 caracteres. */
 export const shortTitle = (title: string, max = 40) => {
   const words = String(title || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
@@ -39,6 +41,10 @@ export const shortTitle = (title: string, max = 40) => {
     if (next.length > max) break;
     out = next;
   }
+  // Não termina em palavra solta como "com", "para", "de" ("MOCHILA IMPERMEÁVEL COM").
+  const parts = out.split(" ");
+  while (parts.length > 2 && DANGLING.test(parts[parts.length - 1])) parts.pop();
+  out = parts.join(" ");
   return (out || words.join(" ").slice(0, max)).toLocaleUpperCase("pt-BR");
 };
 

@@ -254,3 +254,9 @@ test("Status: nunca passa de 10 linhas nem de 700 caracteres", async () => {
   assert.ok(longo.length <= STATUS_MAX_CHARS, `ficou com ${longo.length}`);
   assert.match(longo, /🛒 Garanta a sua aqui 👇/);
 });
+
+test("Status: título curto não termina em palavra solta", async () => {
+  const { shortTitle } = await import("../src/deals/messages");
+  assert.equal(shortTitle("Mochila Para Notebook Impermeável com Porta USB e Senha Para Homem"), "MOCHILA PARA NOTEBOOK IMPERMEÁVEL");
+  assert.equal(shortTitle("Colchão Antiescara Pneumático De Ar Com Compressor"), "COLCHÃO ANTIESCARA PNEUMÁTICO DE AR");
+});
