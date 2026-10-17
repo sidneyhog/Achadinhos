@@ -1132,6 +1132,20 @@ app.patch("/api/connections/:id", auth, async (req, res, next) => {
   }
 });
 
+app.post("/api/connections/:id/status-test", auth, async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    const id = Number(req.params.id);
+    const own = await one("SELECT id FROM whatsapp_sessions WHERE id = $1 AND company_id = $2", [id, companyId]);
+    if (!own) return res.status(404).json({ error: "Conexão não encontrada" });
+    const reply = await askWorker({ op: "status-test", companyId, sessionId: id, phone: String(req.body?.phone || "") }, 60);
+    if (!reply.ok) return res.status(400).json({ error: reply.error || "Não foi possível enviar o teste" });
+    res.json(reply);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/api/connections/:id/start", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);

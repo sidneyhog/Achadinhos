@@ -1,6 +1,6 @@
 import { audit, migrate, q } from "./db";
 import { remindDue } from "./reminders";
-import { runDueDeals } from "./engine/runDeals";
+import { runDueDeals, statusTest } from "./engine/runDeals";
 import { tickAudience } from "./engine/audience";
 import { phoneFromParticipant } from "./deals/audiencePolicy";
 import { getRedis } from "./redis";
@@ -131,6 +131,10 @@ if (redis) {
           if (!companyId) return reply({ ok: false, error: "Empresa inválida" });
           void runDueDeals(companyId).catch(err => console.error("[worker] buscar agora", err));
           return reply({ ok: true, queued: true });
+        }
+        if (job.op === "status-test") {
+          const result = await statusTest(Number(job.companyId), Number(job.sessionId), String((job as { phone?: string }).phone || ""));
+          return reply({ ok: true, ...result });
         }
         const live = getLive(Number(job.sessionId));
         if (!live?.client.group) return reply({ ok: false, error: "O WhatsApp desta conexão ainda não está pronto." });

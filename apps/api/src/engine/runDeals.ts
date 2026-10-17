@@ -173,6 +173,26 @@ const statusAudience = async (companyId: number, whatsappId: number, groups: Arr
   return [...lids].filter(jid => jid.split("@")[0] !== meLid).slice(0, STATUS_SEND_CAP);
 };
 
+/**
+ * Teste do Status pelo painel: publica um Status curto só para um número (e para a própria conta)
+ * e diz se esse número estaria na lista normal. Separa "não está na lista" de "não foi entregue".
+ */
+export const statusTest = async (companyId: number, whatsappId: number, phone: string) => {
+  const live = getLive(whatsappId);
+  if (!live) throw new Error("WhatsApp desta conexão não está conectado.");
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length < 10) throw new Error("Informe o número com DDD.");
+  const lookup = live.client.profile?.getLidsByPhoneNumbers;
+  if (!lookup) throw new Error("Esta versão do WhatsApp não converte número em LID.");
+  const [found] = await lookup([digits.length <= 11 ? `55${digits}` : digits]);
+  if (!found || found.exists === false || !found.lidJid) throw new Error("Esse número não tem WhatsApp ou o WhatsApp não informou o LID dele.");
+  const lid = `${found.lidJid.split("@")[0].split(":")[0]}@lid`;
+  const groups = await q<{ group_jid: string }>("SELECT group_jid FROM groups WHERE company_id = $1 AND whatsapp_id = $2 AND enabled = true", [companyId, whatsappId]);
+  const audience = await statusAudience(companyId, whatsappId, groups);
+  await sendStatus(whatsappId, [lid], null, `✅ Teste do Status do Achadinhos\n\nSe você está vendo isto, o Status chega até você. (${new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo" })})`);
+  return { lid, inAudience: audience.includes(lid), audienceSize: audience.length };
+};
+
 /** Até quantas pessoas um Status vai: listas grandes demais também são recusadas pelo WhatsApp. */
 const STATUS_SEND_CAP = 1000;
 
@@ -606,8 +626,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
             }
             await q(
               `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Status','sent',$9,$10)`,
-              [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, crypto.randomBytes(8).toString("hex"), pub.id]
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sent',$10,$11)`,
+              [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, `Status · ${pub.recipients.length} pessoas`, crypto.randomBytes(8).toString("hex"), pub.id]
             );
             sent += 1;
             pub.sentToday += 1;

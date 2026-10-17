@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 
 type Store = { id: string; label: string; logo: string };
-type Post = { group_jid?: string; status?: string; whatsapp_id?: number | string; marketplace?: string; created_at?: string; title?: string; error?: string };
+type Post = { group_name?: string; group_jid?: string; status?: string; whatsapp_id?: number | string; marketplace?: string; created_at?: string; title?: string; error?: string };
 
 type Props = {
   conn: any;
@@ -31,6 +31,9 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [testPhone, setTestPhone] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testNote, setTestNote] = useState("");
   const [, tick] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => tick((n) => n + 1), 1000);
@@ -89,6 +92,19 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
     }
   };
 
+  const runTest = async () => {
+    setTesting(true);
+    setTestNote("");
+    try {
+      const result = await api<{ inAudience: boolean; audienceSize: number }>(`/api/connections/${conn.id}/status-test`, { method: "POST", body: JSON.stringify({ phone: testPhone }) });
+      setTestNote(`Teste enviado só para esse número. ${result.inAudience ? "Ele ESTÁ" : "Ele NÃO está"} na lista normal do Status (${result.audienceSize} pessoas). Peça para a pessoa olhar os Status em 1 minuto.`);
+    } catch (err) {
+      setTestNote(err instanceof Error ? err.message : "Não foi possível enviar o teste");
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const on = Boolean(conn.status_enabled);
   return (
     <div className="aff-prefs">
@@ -100,6 +116,7 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
             : "Nada vai para o Status desta conexão. Ligue abaixo para publicar as ofertas também lá."}
         </span>
       </div>
+      {sent[0]?.group_name && sent[0].group_name !== "Status" ? <p className="aff-note">Último Status foi para: {String(sent[0].group_name).replace(/^Status · /, "")}.</p> : null}
       {showError ? <p className="aff-config-error">Última falha no Status ({ago(lastError.created_at)}): {String(lastError.error || "").replace(/^Status:\s*/, "")}</p> : null}
       <div className="aff-conn__actions">
         <button type="button" className={on ? "" : "is-solid"} disabled={saving} onClick={() => save(!on)}>{on ? "Desligar Status" : "Ligar Status"}</button>
@@ -142,6 +159,12 @@ export function StatusTab({ conn, stores, posts, activeGroups, ago, speakWait, o
         <small>Somando todas as lojas. Zera à meia-noite (horário de Brasília).</small>
       </article>
       {note ? <p className="aff-config-error">{note}</p> : null}
+      <article className="aff-pref">
+        <label>Testar com um número (com DDD)<input inputMode="tel" placeholder="19 99999-9999" value={testPhone} onChange={(event) => setTestPhone(event.target.value)} /></label>
+        <small>Publica um Status curto de teste só para esse número. Serve para ver se o Status chega numa pessoa específica.</small>
+        <div className="aff-conn__actions"><button type="button" disabled={testing || testPhone.replace(/\D/g, "").length < 10} onClick={runTest}>{testing ? "Enviando…" : "Enviar Status de teste"}</button></div>
+        {testNote ? <p className="aff-note">{testNote}</p> : null}
+      </article>
       <div className="aff-conn__actions">
         <button type="button" className="is-solid" disabled={saving || !dirty} onClick={() => save()}>{saving ? "Salvando…" : dirty ? "Salvar alterações" : "Tudo salvo"}</button>
       </div>
