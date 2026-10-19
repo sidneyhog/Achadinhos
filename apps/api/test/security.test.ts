@@ -148,6 +148,52 @@ describe("fluxos legítimos (regressão)", () => {
   });
 });
 
+describe("parceiros e comissão por indicação", () => {
+  test("cadastro com código liga ao parceiro; webhook e pagamento manual geram comissão; pausado não gera", async () => {
+    const code = `P${randomBytes(3).toString("hex").toUpperCase()}`;
+    const created = await call("/api/admin/partners", { method: "POST", token: adminToken, body: { name: "ADM Teste", code, percent: 20 } });
+    assert.equal(created.status, 201, JSON.stringify(created.json));
+    const partnerId = (created.json.partner as { id: number }).id;
+    const repeated = await call("/api/admin/partners", { method: "POST", token: adminToken, body: { name: "Outro", code, percent: 10 } });
+    assert.equal(repeated.status, 409);
+
+    const email = `ref-${unique()}@test.local`;
+    const reg = await call("/api/auth/register", {
+      method: "POST",
+      body: { name: "Indicado", email, password: "senha-forte-123", companyName: `Indicada ${unique()}`, city: "Rio Claro", state: "SP", planSlug, ref: code.toLowerCase() }
+    });
+    assert.equal(reg.status, 201, JSON.stringify(reg.json));
+    const companyId = (reg.json.user as { companyId: number }).companyId;
+    const linked = await db.query("SELECT partner_id FROM companies WHERE id = $1", [companyId]);
+    assert.equal(linked.rows[0].partner_id, partnerId, "código em minúsculas também liga");
+
+    const txid = randomBytes(13).toString("hex");
+    await db.query("INSERT INTO invoices (company_id, amount_cents, method, cycle, external_id) VALUES ($1, 4990, 'pix', 'monthly', $2)", [companyId, txid]);
+    await call(`/api/billing/webhook?hmac=${WEBHOOK_SECRET}`, { method: "POST", body: { pix: [{ txid, valor: "49.90" }] } });
+    const viaPix = await db.query("SELECT partner_id, partner_cents FROM invoices WHERE external_id = $1", [txid]);
+    assert.equal(viaPix.rows[0].partner_id, partnerId);
+    assert.equal(viaPix.rows[0].partner_cents, 998, "20% de 49,90");
+
+    const manual = await call(`/api/admin/companies/${companyId}/payment`, { method: "POST", token: adminToken, body: { amountCents: 5000, days: 30 } });
+    assert.equal(manual.status, 200, JSON.stringify(manual.json));
+    await call(`/api/admin/partners/${partnerId}/payouts`, { method: "POST", token: adminToken, body: { amountCents: 998, note: "teste" } });
+    const board = await call("/api/admin/console", { token: adminToken });
+    const row = (board.json.partners as Array<{ id: number; earned_cents: number; paid_cents: number; active_companies: number }>).find(p => p.id === partnerId)!;
+    assert.equal(row.earned_cents, 998 + 1000);
+    assert.equal(row.paid_cents, 998);
+    assert.equal(row.active_companies, 1);
+
+    await call(`/api/admin/partners/${partnerId}`, { method: "PATCH", token: adminToken, body: { active: false } });
+    await call(`/api/admin/companies/${companyId}/payment`, { method: "POST", token: adminToken, body: { amountCents: 5000, days: 30 } });
+    const after = await db.query("SELECT coalesce(sum(partner_cents), 0)::int AS total FROM invoices WHERE partner_id = $1", [partnerId]);
+    assert.equal(after.rows[0].total, 1998, "parceiro pausado não ganha comissão nova");
+
+    const plain = await registerOwner();
+    const none = await db.query("SELECT partner_id FROM companies WHERE id = $1", [plain.companyId]);
+    assert.equal(none.rows[0].partner_id, null);
+  });
+});
+
 describe("SEC-01 webhook de cobrança", () => {
   test("sem segredo, um cliente não consegue marcar a própria fatura como paga", async () => {
     const owner = await registerOwner();

@@ -45,6 +45,7 @@ export const ADMIN_PATH = {
   whatsapp: "/admin/whatsapp",
   stores: "/admin/lojas",
   coupons: "/admin/cupons",
+  partners: "/admin/parceiros",
   reports: "/admin/relatorios",
   logs: "/admin/logs",
   audit: "/admin/auditoria",

@@ -3,6 +3,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Too
 import { api } from "./api";
 import type { Session } from "./App";
 import { Mark } from "./Mark";
+import { AdminPartners } from "./AdminPartners";
 import { ADMIN_PATH, go, usePath } from "./route";
 import "./admin.css";
 
@@ -15,6 +16,7 @@ const NAV = [
   ["whatsapp", "WhatsApp"],
   ["stores", "Lojas"],
   ["coupons", "Cupons"],
+  ["partners", "Parceiros"],
   ["reports", "Relatórios"],
   ["logs", "Logs"],
   ["audit", "Auditoria"],
@@ -33,6 +35,7 @@ const SUBTITLE: Record<(typeof NAV)[number][0], string> = {
   whatsapp: "Conexões, QR e falhas em tempo real.",
   stores: "Credenciais de afiliado por marketplace.",
   coupons: "Descontos aplicados no checkout.",
+  partners: "Indicações, comissões e pagamentos a parceiros.",
   reports: "Crescimento, cancelamento e cliques.",
   logs: "Erros do robô e eventos de pagamento.",
   audit: "Quem fez o quê, em qual empresa.",
@@ -107,6 +110,7 @@ const ICONS: Record<View, string> = {
   whatsapp: "M8 4h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM10 18h4",
   stores: "M4 9h16l-1 11H5L4 9zM8 9V7a4 4 0 0 1 8 0v2",
   coupons: "M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4zM12 8v8",
+  partners: "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a6 6 0 0 1 12 0M16 11a3 3 0 1 0 0-6M17 14a5 5 0 0 1 4 6",
   reports: "M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3",
   logs: "M7 4h7l5 5v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM14 4v5h5M8 13h8M8 17h5",
   audit: "M8 11V8a4 4 0 0 1 8 0v3M6 11h12v9H6z",
@@ -694,6 +698,8 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
             </>
           ) : null}
 
+          {board && view === "partners" ? <AdminPartners partners={board.partners || []} run={run} tell={tell} /> : null}
+
           {board && view === "reports" ? (
             <>
               <div className="sx-toolbar">
@@ -925,6 +931,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <div><dt>Cidade</dt><dd>{detail.city || "—"}</dd></div>
                 <div><dt>Estado</dt><dd>{detail.state || "—"}</dd></div>
                 <div><dt>Receita paga</dt><dd>{money(detail.revenue_cents)}</dd></div>
+                <div><dt>Indicado por</dt><dd>{detail.partner_name ? `${detail.partner_name} (${detail.partner_code})` : "—"}</dd></div>
                 <div><dt>Validade</dt><dd>{when(detail.current_period_end || detail.trial_ends_at)}</dd></div>
                 <div><dt>Último acesso</dt><dd>{when(detail.last_login_at)}</dd></div>
                 <div><dt>Cadastro</dt><dd>{when(detail.created_at)}</dd></div>
@@ -953,6 +960,30 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label>Assinatura<select name="subStatus" defaultValue={detail.sub_status || "trialing"}><option value="trialing">Teste</option><option value="active">Paga</option><option value="canceled">Cancelada</option></select></label>
                 <label>Validade<input type="date" name="validUntil" defaultValue={String(detail.current_period_end || detail.trial_ends_at || "").slice(0, 10)} /></label>
                 <div className="is-wide"><button className="sx-btn is-solid" type="submit">Salvar</button></div>
+              </form>
+            </div>
+            <div className="sx-drawer__body">
+              <form className="sx-form" key={`pay-${detail.id}`} onSubmit={async (event) => {
+                event.preventDefault();
+                const form = event.currentTarget;
+                const data = new FormData(form);
+                const cents = reaisToCents(String(data.get("amount") || ""));
+                if (!cents) { tell("Valor", "Informe o valor recebido.", "bad"); return; }
+                const ok = await run("Pagamento registrado", `${detail.name} foi renovada.`, () => api(`/api/admin/companies/${detail.id}/payment`, { method: "POST", body: JSON.stringify({ amountCents: cents, days: data.get("days") }) }));
+                if (ok) form.reset();
+              }}>
+                <p className="sx-note is-wide">Recebeu por fora (Pix direto)? Registre aqui: renova a empresa e conta comissão para o parceiro que indicou.</p>
+                <label>Valor recebido (R$)<input name="amount" placeholder="49,90" /></label>
+                <label>Dias<select name="days" defaultValue="30"><option value="30">30 dias</option><option value="90">90 dias</option><option value="180">180 dias</option><option value="365">365 dias</option></select></label>
+                <div className="is-wide"><button className="sx-btn is-solid" type="submit">Registrar pagamento</button></div>
+              </form>
+              <form className="sx-form" key={`ref-${detail.id}-${detail.partner_code || ""}`} onSubmit={async (event) => {
+                event.preventDefault();
+                const data = new FormData(event.currentTarget);
+                await run("Salvo", "Indicação atualizada.", () => api(`/api/admin/companies/${detail.id}/partner`, { method: "POST", body: JSON.stringify({ code: data.get("code") }) }));
+              }}>
+                <label>Código do parceiro<input name="code" defaultValue={detail.partner_code || ""} placeholder="vazio = sem parceiro" /></label>
+                <div><button className="sx-btn" type="submit">Salvar indicação</button></div>
               </form>
             </div>
             <footer className="sx-drawer__foot">

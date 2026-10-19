@@ -34,6 +34,16 @@ export function App() {
   const [plan, setPlan] = useState(() => new URLSearchParams(window.location.search).get("plano") || "");
   const [plans, setPlans] = useState<Array<{ slug: string; name: string; trial_days: number }>>([]);
   const [error, setError] = useState("");
+  // Código de indicação do parceiro: chega no link (?ref=CODIGO) e fica guardado até o cadastro.
+  const [refCode, setRefCode] = useState(() => {
+    const fromUrl = (new URLSearchParams(window.location.search).get("ref") || "").trim().toUpperCase();
+    try {
+      if (fromUrl) localStorage.setItem("achadinhos-ref", fromUrl);
+      return fromUrl || localStorage.getItem("achadinhos-ref") || "";
+    } catch {
+      return fromUrl;
+    }
+  });
   const screen = path === "/login" ? "login" : path === "/cadastro" ? "register" : "landing";
 
   const refresh = async () => {
@@ -76,10 +86,13 @@ export function App() {
     try {
       const url = screen === "register" ? "/api/auth/register" : "/api/auth/login";
       const body = screen === "register"
-        ? { name: form.get("name"), email: form.get("email"), password: form.get("password"), companyName: form.get("companyName"), phone: form.get("phone"), city: form.get("city"), state: form.get("state"), planSlug: plan }
+        ? { name: form.get("name"), email: form.get("email"), password: form.get("password"), companyName: form.get("companyName"), phone: form.get("phone"), city: form.get("city"), state: form.get("state"), planSlug: plan, ref: refCode }
         : { email: form.get("email"), password: form.get("password") };
       const data = await api<{ token: string }>(url, { method: "POST", body: JSON.stringify(body) });
       setToken(data.token);
+      if (screen === "register") {
+        try { localStorage.removeItem("achadinhos-ref"); } catch { /* sem armazenamento local */ }
+      }
       const next = await refresh();
       go(next.user.role === "superadmin" ? "/admin" : "/home");
     } catch (err) {
@@ -157,6 +170,7 @@ export function App() {
                       </select>
                     </label>
                   </div>
+                  <label>Código de indicação (opcional)<input value={refCode} onChange={(event) => setRefCode(event.target.value.toUpperCase())} placeholder="Se alguém te indicou" /></label>
                   <label>Plano
                     <select value={plan} onChange={(event) => setPlan(event.target.value)} required>
                       {!plans.length ? <option value="">Nenhum plano disponível</option> : null}

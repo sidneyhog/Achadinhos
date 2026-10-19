@@ -266,6 +266,7 @@ app.post("/api/auth/register", async (req, res, next) => {
     const city = String(req.body?.city || "").trim().slice(0, 80);
     const state = String(req.body?.state || "").trim().toUpperCase();
     const planSlug = String(req.body?.planSlug || "starter");
+    const refCode = String(req.body?.ref || "").trim().toUpperCase().slice(0, 32);
     const ipKey = `register:${ipOf(req)}`;
     if (limited(ipKey, REGISTER_PER_IP, REGISTER_WINDOW_MS)) {
       return res.status(429).json({ error: "Muitos cadastros a partir deste endereço. Tente de novo mais tarde." });
@@ -279,12 +280,14 @@ app.post("/api/auth/register", async (req, res, next) => {
     }
     const plan = await one<{ id: number; trial_days: number }>("SELECT id, trial_days FROM plans WHERE slug = $1 AND active = true", [planSlug]);
     if (!plan) return res.status(400).json({ error: "Plano inválido" });
+    // Código de indicação: liga a empresa ao parceiro, que ganha comissão de cada pagamento enquanto ela pagar.
+    const partner = refCode ? await one<{ id: number }>("SELECT id FROM partners WHERE upper(code) = $1 AND active = true", [refCode]) : null;
     const hash = await bcrypt.hash(password, 10);
     // Empresa, dono, assinatura e configurações nascem juntos. Antes, um e-mail repetido deixava a empresa órfã no banco.
     const { company, user } = await withTransaction(async tx => {
       const company = await tx.one<{ id: number; tenant_id: string }>(
-        "INSERT INTO companies (name, city, state) VALUES ($1,$2,$3) RETURNING id, tenant_id",
-        [companyName, city, state]
+        "INSERT INTO companies (name, city, state, partner_id, partner_since) VALUES ($1,$2,$3,$4, CASE WHEN $4::int IS NULL THEN NULL ELSE now() END) RETURNING id, tenant_id",
+        [companyName, city, state, partner?.id ?? null]
       );
       if (!company) throw new Error("Falha ao criar empresa");
       const user = await tx.one<{ id: number }>(
@@ -559,14 +562,25 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
               (SELECT count(*)::int FROM stores st WHERE st.company_id = c.id AND st.enabled = true) AS stores,
               (SELECT count(*)::int FROM posts po WHERE po.company_id = c.id AND po.status = 'sent') AS posts,
               (SELECT coalesce(sum(click_count), 0)::int FROM posts po WHERE po.company_id = c.id) AS clicks,
-              (SELECT coalesce(sum(amount_cents), 0)::int FROM invoices i WHERE i.company_id = c.id AND i.status = 'paid') AS revenue_cents
+              (SELECT coalesce(sum(amount_cents), 0)::int FROM invoices i WHERE i.company_id = c.id AND i.status = 'paid') AS revenue_cents,
+              pa.name AS partner_name, pa.code AS partner_code, c.partner_since
        FROM companies c
+       LEFT JOIN partners pa ON pa.id = c.partner_id
        LEFT JOIN subscriptions s ON s.company_id = c.id
        LEFT JOIN plans p ON p.id = s.plan_id
        LEFT JOIN LATERAL (SELECT name, email, phone, last_login_at FROM users WHERE company_id = c.id AND role = 'owner' ORDER BY id LIMIT 1) u ON true
        ORDER BY c.id DESC`
     );
     const plans = await q("SELECT * FROM plans ORDER BY sort_order, monthly_cents");
+    const partners = await q(
+      `SELECT p.*,
+              (SELECT count(*)::int FROM companies c WHERE c.partner_id = p.id) AS companies,
+              (SELECT count(*)::int FROM companies c JOIN subscriptions s ON s.company_id = c.id WHERE c.partner_id = p.id AND c.status = 'active' AND s.status = 'active') AS active_companies,
+              (SELECT coalesce(sum(partner_cents), 0)::int FROM invoices i WHERE i.partner_id = p.id AND i.status = 'paid') AS earned_cents,
+              (SELECT coalesce(sum(partner_cents), 0)::int FROM invoices i WHERE i.partner_id = p.id AND i.status = 'paid' AND i.paid_at >= date_trunc('month', now())) AS earned_month_cents,
+              (SELECT coalesce(sum(amount_cents), 0)::int FROM partner_payouts po WHERE po.partner_id = p.id) AS paid_cents
+       FROM partners p ORDER BY p.active DESC, p.name`
+    );
     const subscriptions = await q(
       `SELECT s.id, c.name AS company, p.name AS plan, s.status, s.cycle, s.created_at, s.trial_ends_at, s.current_period_end,
               CASE s.cycle WHEN 'yearly' THEN p.yearly_cents WHEN 'semiannual' THEN p.semiannual_cents WHEN 'quarterly' THEN p.quarterly_cents ELSE p.monthly_cents END AS amount_cents
@@ -606,7 +620,7 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
     const platform = await loadPlatform();
     const efi = await loadEfiRuntime();
     res.json({
-      metrics, days, months, due, companies, plans, subscriptions, invoices, whatsapp, stores, coupons, logs, audit: auditLogs,
+      metrics, days, months, due, companies, plans, partners, subscriptions, invoices, whatsapp, stores, coupons, logs, audit: auditLogs,
       platform: {
         clientId: platform.efi_client_id || process.env.EFI_CLIENT_ID || "",
         pixKey: platform.efi_pix_key || process.env.EFI_PIX_KEY || "",
@@ -700,6 +714,110 @@ app.post("/api/admin/efi/test", auth, admin, async (req, res) => {
     const message = err instanceof Error ? err.message : "A EFI não respondeu";
     res.status(502).json({ error: message.slice(0, 220) });
   }
+});
+
+const PARTNER_CODE = /^[A-Z0-9_-]{3,24}$/;
+
+app.post("/api/admin/partners", auth, admin, async (req, res) => {
+  const name = String(req.body?.name || "").trim().slice(0, 120);
+  const code = String(req.body?.code || "").trim().toUpperCase();
+  const percent = Math.round(Number(req.body?.percent));
+  if (!name) return res.status(400).json({ error: "Informe o nome do parceiro" });
+  if (!PARTNER_CODE.test(code)) return res.status(400).json({ error: "O código precisa ter de 3 a 24 letras ou números" });
+  if (!Number.isFinite(percent) || percent < 1 || percent > 90) return res.status(400).json({ error: "A comissão precisa ficar entre 1% e 90%" });
+  try {
+    const row = await one(
+      "INSERT INTO partners (name, phone, code, percent, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [name, String(req.body?.phone || "").replace(/\D/g, "").slice(0, 16), code, percent, String(req.body?.notes || "").slice(0, 500)]
+    );
+    await audit(null, (req as Request & { auth: AuthUser }).auth.id, "partner", `Parceiro ${name} (${code}) criado com ${percent}%`, ipOf(req));
+    res.status(201).json({ partner: row });
+  } catch (err) {
+    if ((err as { code?: string }).code === "23505") return res.status(409).json({ error: "Esse código já existe" });
+    throw err;
+  }
+});
+
+app.patch("/api/admin/partners/:id", auth, admin, async (req, res) => {
+  const id = Number(req.params.id);
+  const percent = req.body?.percent == null ? null : Math.round(Number(req.body.percent));
+  if (percent != null && (!Number.isFinite(percent) || percent < 1 || percent > 90)) return res.status(400).json({ error: "A comissão precisa ficar entre 1% e 90%" });
+  await q(
+    `UPDATE partners SET name = COALESCE($2, name), phone = COALESCE($3, phone), percent = COALESCE($4, percent),
+       active = COALESCE($5, active), notes = COALESCE($6, notes) WHERE id = $1`,
+    [id, req.body?.name ? String(req.body.name).trim().slice(0, 120) : null, req.body?.phone == null ? null : String(req.body.phone).replace(/\D/g, "").slice(0, 16),
+     percent, typeof req.body?.active === "boolean" ? req.body.active : null, req.body?.notes == null ? null : String(req.body.notes).slice(0, 500)]
+  );
+  await audit(null, (req as Request & { auth: AuthUser }).auth.id, "partner", `Parceiro ${id} atualizado`, ipOf(req));
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/partners/:id", auth, admin, async (req, res) => {
+  const id = Number(req.params.id);
+  const companies = await q(
+    `SELECT c.id, c.name, c.status, c.partner_since, s.status AS sub_status, coalesce(s.current_period_end, s.trial_ends_at) AS ends_at,
+            (SELECT coalesce(sum(partner_cents), 0)::int FROM invoices i WHERE i.company_id = c.id AND i.partner_id = $1 AND i.status = 'paid') AS earned_cents
+     FROM companies c LEFT JOIN subscriptions s ON s.company_id = c.id WHERE c.partner_id = $1 ORDER BY c.id DESC`,
+    [id]
+  );
+  const commissions = await q(
+    `SELECT i.id, c.name AS company, i.amount_cents, i.partner_cents, i.method, i.paid_at
+     FROM invoices i JOIN companies c ON c.id = i.company_id WHERE i.partner_id = $1 AND i.status = 'paid' ORDER BY i.paid_at DESC LIMIT 200`,
+    [id]
+  );
+  const payouts = await q("SELECT id, amount_cents, note, paid_at FROM partner_payouts WHERE partner_id = $1 ORDER BY paid_at DESC", [id]);
+  res.json({ companies, commissions, payouts });
+});
+
+app.post("/api/admin/partners/:id/payouts", auth, admin, async (req, res) => {
+  const id = Number(req.params.id);
+  const amount = Math.round(Number(req.body?.amountCents));
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Informe o valor pago" });
+  const partner = await one<{ name: string }>("SELECT name FROM partners WHERE id = $1", [id]);
+  if (!partner) return res.status(404).json({ error: "Parceiro não encontrado" });
+  await q("INSERT INTO partner_payouts (partner_id, amount_cents, note) VALUES ($1,$2,$3)", [id, amount, String(req.body?.note || "").slice(0, 200)]);
+  await audit(null, (req as Request & { auth: AuthUser }).auth.id, "partner", `Pagamento de comissão a ${partner.name}: ${(amount / 100).toFixed(2)}`, ipOf(req));
+  res.status(201).json({ ok: true });
+});
+
+app.post("/api/admin/companies/:id/partner", auth, admin, async (req, res) => {
+  const id = Number(req.params.id);
+  const code = String(req.body?.code || "").trim().toUpperCase();
+  if (!code) {
+    await q("UPDATE companies SET partner_id = NULL, partner_since = NULL WHERE id = $1", [id]);
+    await audit(id, (req as Request & { auth: AuthUser }).auth.id, "partner", "Indicação removida", ipOf(req));
+    return res.json({ ok: true });
+  }
+  const partner = await one<{ id: number; name: string }>("SELECT id, name FROM partners WHERE upper(code) = $1", [code]);
+  if (!partner) return res.status(404).json({ error: "Código de parceiro não encontrado" });
+  await q("UPDATE companies SET partner_id = $2, partner_since = COALESCE(CASE WHEN partner_id = $2 THEN partner_since END, now()) WHERE id = $1", [id, partner.id]);
+  await audit(id, (req as Request & { auth: AuthUser }).auth.id, "partner", `Empresa ligada ao parceiro ${partner.name}`, ipOf(req));
+  res.json({ ok: true });
+});
+
+// Pagamento recebido por fora (Pix direto, dinheiro): renova e gera a fatura paga, que conta comissão de parceiro.
+app.post("/api/admin/companies/:id/payment", auth, admin, async (req, res) => {
+  const id = Number(req.params.id);
+  const amount = Math.round(Number(req.body?.amountCents));
+  const days = Math.min(365, Math.max(1, Math.round(Number(req.body?.days) || 30)));
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Informe o valor recebido" });
+  const sub = await one<{ plan_id: number }>("SELECT plan_id FROM subscriptions WHERE company_id = $1", [id]);
+  if (!sub) return res.status(404).json({ error: "Empresa sem assinatura" });
+  const cycle = days >= 365 ? "yearly" : days >= 180 ? "semiannual" : days >= 90 ? "quarterly" : "monthly";
+  await withTransaction(async tx => {
+    const invoice = await tx.one<{ id: number }>(
+      "INSERT INTO invoices (company_id, plan_id, amount_cents, method, cycle, status, paid_at, external_id) VALUES ($1,$2,$3,'manual',$4,'paid',now(),$5) RETURNING id",
+      [id, sub.plan_id, amount, cycle, `manual-${crypto.randomBytes(8).toString("hex")}`]
+    );
+    await tx.q(
+      "UPDATE subscriptions SET status = 'active', current_period_end = GREATEST(now(), coalesce(current_period_end, now())) + ($2 || ' days')::interval, updated_at = now() WHERE company_id = $1",
+      [id, String(days)]
+    );
+    await tx.q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status <> 'blocked'", [id]);
+    await tx.q(PARTNER_COMMISSION_SQL, [invoice!.id]);
+  });
+  await audit(id, (req as Request & { auth: AuthUser }).auth.id, "payment", `Pagamento manual de ${(amount / 100).toFixed(2)} (${days} dias)`, ipOf(req));
+  res.json({ ok: true });
 });
 
 app.post("/api/admin/coupons", auth, admin, async (req, res) => {
@@ -1787,6 +1905,12 @@ const webhookAllowed = (req: Request) => {
   return given.length === wanted.length && crypto.timingSafeEqual(given, wanted);
 };
 
+/** Comissão do parceiro que indicou a empresa, gravada na própria fatura paga (vale o percentual do dia do pagamento). */
+const PARTNER_COMMISSION_SQL = `
+  UPDATE invoices i SET partner_id = p.id, partner_cents = round(i.amount_cents * p.percent / 100.0)::int
+  FROM companies c JOIN partners p ON p.id = c.partner_id
+  WHERE i.id = $1 AND c.id = i.company_id AND p.active = true AND i.status = 'paid'`;
+
 const billingWebhook = async (req: Request, res: Response) => {
   if (!webhookAllowed(req)) {
     const configured = Boolean(process.env.EFI_WEBHOOK_SECRET);
@@ -1818,6 +1942,7 @@ const billingWebhook = async (req: Request, res: Response) => {
       );
       await tx.q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [invoice.company_id]);
       await tx.q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'paid',$3::jsonb)", [invoice.company_id, invoice.id, JSON.stringify(item)]);
+      await tx.q(PARTNER_COMMISSION_SQL, [invoice.id]);
       return true;
     });
     if (applied) await audit(invoice.company_id, null, "payment", "Pagamento confirmado");

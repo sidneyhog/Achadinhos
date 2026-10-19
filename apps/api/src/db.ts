@@ -63,6 +63,27 @@ export const migrate = async () => {
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_per_cycle INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_stores JSONB NOT NULL DEFAULT '[]';
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS address_book_synced_at TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS partners (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL DEFAULT '',
+      code TEXT NOT NULL UNIQUE,
+      percent INTEGER NOT NULL DEFAULT 20,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS partner_payouts (
+      id SERIAL PRIMARY KEY,
+      partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      amount_cents INTEGER NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      paid_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS partner_since TIMESTAMPTZ;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS partner_cents INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS wa_address_book (
       whatsapp_id INTEGER NOT NULL,
       jid TEXT NOT NULL,
