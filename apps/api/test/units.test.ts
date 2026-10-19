@@ -260,3 +260,34 @@ test("Status: título curto não termina em palavra solta", async () => {
   assert.equal(shortTitle("Mochila Para Notebook Impermeável com Porta USB e Senha Para Homem"), "MOCHILA PARA NOTEBOOK IMPERMEÁVEL");
   assert.equal(shortTitle("Colchão Antiescara Pneumático De Ar Com Compressor"), "COLCHÃO ANTIESCARA PNEUMÁTICO DE AR");
 });
+
+test("Mercado Livre: rodízio passa por todas as páginas e o acervo guarda o que foi lido", async () => {
+  const { ML_SOURCES, ML_ROTATING_PER_LOAD, sourcesFor, mergeIntoPool } = await import("../src/deals/searchMercadoLivre");
+  const seen = new Set<string>();
+  let cursor = 0;
+  for (let load = 0; load < Math.ceil(ML_SOURCES.length / ML_ROTATING_PER_LOAD); load += 1) {
+    const sources = sourcesFor(cursor);
+    assert.deepEqual(sources[0], {}, "a página 1 entra em toda leitura");
+    sources.slice(1).forEach(source => seen.add(JSON.stringify(source)));
+    cursor = (cursor + ML_ROTATING_PER_LOAD) % ML_SOURCES.length;
+  }
+  assert.equal(seen.size, ML_SOURCES.length, "em uma volta do rodízio todas as fontes são lidas");
+
+  const offer = (id: string) => ({ externalId: id, title: id, priceCents: 100, url: `https://x/${id}`, marketplace: "ml" }) as never;
+  const pool = new Map();
+  mergeIntoPool(pool, [offer("a"), offer("b")], 0);
+  const later = mergeIntoPool(pool, [offer("c")], 60_000);
+  assert.deepEqual(later.map(item => (item as { externalId: string }).externalId).sort(), ["a", "b", "c"]);
+  const old = mergeIntoPool(pool, [offer("d")], 7 * 3600_000);
+  assert.deepEqual(old.map(item => (item as { externalId: string }).externalId), ["d"], "o que passou de 6 horas sai do acervo");
+  assert.equal(mergeIntoPool(new Map(), [offer("1"), offer("2"), offer("3")], 0, 3600_000, 2).length, 2, "acervo respeita o teto");
+});
+
+test("variações do mesmo anúncio contam como repetição", async () => {
+  const { titleKey } = await import("../src/deals/repeatPolicy");
+  assert.equal(
+    titleKey("Lava E Seca Samsung Wd11m Com Digital Inverter Bra"),
+    titleKey("Lava  E Seca Samsung Wd11m Com Digital Inverter Ino")
+  );
+  assert.notEqual(titleKey("Tênis Kappa Park 2.0 Original Unissex"), titleKey("Tênis Casual Kappa Zenit Masculino"));
+});

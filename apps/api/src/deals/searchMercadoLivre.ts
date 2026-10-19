@@ -212,6 +212,44 @@ export const offersFromOffersPage = (
 /** Uma entrada por cookie: o catálogo lido com a sessão de uma empresa não vai para outra. */
 const catalogCache = new Map<string, { at: number; offers: DealOffer[] }>();
 
+/**
+ * O /ofertas tem 20+ páginas de 48 ofertas (19/10/2026), mas ler só as páginas 1 e 2 fazia o robô repetir
+ * os mesmos produtos todo dia. Cada leitura pega a página 1 (as novidades) e mais 3 fontes em rodízio;
+ * o que foi lido fica num acervo por algumas horas, então o robô escolhe entre centenas de ofertas.
+ */
+export const ML_SOURCES: Array<Record<string, string | number>> = [
+  ...Array.from({ length: 19 }, (_, index) => ({ page: index + 2 })),
+  { promotion_type: "lightning" },
+  { promotion_type: "deal_of_the_day" }
+];
+export const ML_ROTATING_PER_LOAD = 3;
+const POOL_HOURS = 6;
+const POOL_MAX = 1200;
+
+/** Fontes de uma leitura: a página 1 e as próximas do rodízio a partir de `cursor`. Exportada para teste. */
+export const sourcesFor = (cursor: number): Array<Record<string, string | number>> => [
+  {},
+  ...Array.from({ length: ML_ROTATING_PER_LOAD }, (_, index) => ML_SOURCES[(cursor + index) % ML_SOURCES.length])
+];
+
+const rotation = new Map<string, number>();
+const pools = new Map<string, Map<string, { at: number; offer: DealOffer }>>();
+
+/** Junta o que acabou de ser lido ao acervo, tira o que ficou velho e devolve do mais novo para o mais antigo. Exportada para teste. */
+export const mergeIntoPool = (
+  pool: Map<string, { at: number; offer: DealOffer }>,
+  fresh: DealOffer[],
+  now: number,
+  maxAgeMs = POOL_HOURS * 3600_000,
+  max = POOL_MAX
+): DealOffer[] => {
+  for (const offer of fresh) pool.set(offer.externalId, { at: now, offer });
+  for (const [id, entry] of pool) if (now - entry.at > maxAgeMs) pool.delete(id);
+  const ordered = [...pool.entries()].sort((a, b) => b[1].at - a[1].at);
+  for (const [id] of ordered.slice(max)) pool.delete(id);
+  return ordered.slice(0, max).map(([, entry]) => entry.offer);
+};
+
 /** O que o ML respondeu na última tentativa; vai para a mensagem de erro do painel quando não vem nenhuma oferta. */
 const lastFetch = { api: "", page: "" };
 
@@ -239,10 +277,13 @@ const loadOfferCatalog = async (cookie = ""): Promise<DealOffer[]> => {
   if (cached && Date.now() - cached.at < 3 * 60 * 1000) {
     return cached.offers;
   }
-  const pages = await Promise.all(
-    [1, 2].map(async page => {
+  const cursor = rotation.get(cacheKey) || 0;
+  rotation.set(cacheKey, (cursor + ML_ROTATING_PER_LOAD) % ML_SOURCES.length);
+  const settled = await Promise.allSettled(
+    sourcesFor(cursor).map(async (params, index) => {
+      const page = index + 1;
       const response = await axios.get("https://www.mercadolivre.com.br/ofertas", {
-        params: page === 1 ? {} : { page },
+        params,
         timeout: 20000,
         responseType: "text",
         headers: offersPageHeaders(cookie)
@@ -260,7 +301,13 @@ const loadOfferCatalog = async (cookie = ""): Promise<DealOffer[]> => {
       return result.offers;
     })
   );
-  const offers = pages.flat();
+  const failed = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+  if (failed && settled.every(item => item.status === "rejected")) throw failed.reason;
+  const fresh = settled.flatMap(item => (item.status === "fulfilled" ? item.value : []));
+  const pool = pools.get(cacheKey) || new Map();
+  pools.set(cacheKey, pool);
+  // Sessão bloqueada não deve continuar publicando o acervo antigo como se estivesse tudo bem.
+  const offers = fresh.length ? mergeIntoPool(pool, fresh, Date.now()) : [];
   catalogCache.set(cacheKey, { at: Date.now(), offers });
   return offers;
 };
@@ -352,7 +399,7 @@ export const searchMercadoLivre = async (
   const seen = new Set<string>();
   const chosen: DealOffer[] = [];
   ordered.forEach(offer => {
-    if (seen.has(offer.externalId) || chosen.length >= 120) return;
+    if (seen.has(offer.externalId) || chosen.length >= 300) return;
     seen.add(offer.externalId);
     chosen.push(offer);
   });

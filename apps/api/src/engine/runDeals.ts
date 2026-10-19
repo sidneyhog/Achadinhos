@@ -15,6 +15,7 @@ import { searchRakuten } from "../deals/searchRakuten";
 import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
+import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
 import { STATUS_JID, STATUS_LIMITS, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
@@ -580,8 +581,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           const destinations = (matching.length ? matching : pub.groups).slice(0, 40);
           for (const group of destinations) {
             const since = await q(
-              `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $3 AND external_id = $4) OR url = $5) LIMIT 1`,
-              [company.id, group.group_jid, offer.marketplace, offer.externalId, published]
+              `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND ${REPEAT_SQL} AND ((marketplace = $3 AND external_id = $4) OR url = $5 OR ${TITLE_KEY_SQL} = $6) LIMIT 1`,
+              [company.id, group.group_jid, offer.marketplace, offer.externalId, published, titleKey(offer.title)]
             );
             if (since.length) continue;
             const token = crypto.randomBytes(8).toString("hex");
@@ -615,8 +616,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           const last = pub.lastSent.get(marketplace) || 0;
           if (last && Date.now() - last < statusWait(pub.cadence, marketplace) * 1000) continue;
           const repeated = await q(
-            `SELECT id FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' AND created_at > now() - interval '24 hours' AND ((marketplace = $4 AND external_id = $5) OR url = $6) LIMIT 1`,
-            [company.id, pub.id, STATUS_JID, offer.marketplace, offer.externalId, published]
+            `SELECT id FROM posts WHERE company_id = $1 AND whatsapp_id = $2 AND group_jid = $3 AND status = 'sent' AND ${REPEAT_SQL} AND ((marketplace = $4 AND external_id = $5) OR url = $6 OR ${TITLE_KEY_SQL} = $7) LIMIT 1`,
+            [company.id, pub.id, STATUS_JID, offer.marketplace, offer.externalId, published, titleKey(offer.title)]
           );
           if (repeated.length) continue;
           try {
@@ -664,8 +665,8 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
               if (!textMatches(offer, chat.categories || "")) continue;
               const jid = `telegram:${chat.chatId}`;
               const dup = await q(
-                `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND created_at > now() - interval '24 hours' AND external_id = $3 LIMIT 1`,
-                [company.id, jid, offer.externalId]
+                `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND ${REPEAT_SQL} AND (external_id = $3 OR ${TITLE_KEY_SQL} = $4) LIMIT 1`,
+                [company.id, jid, offer.externalId, titleKey(offer.title)]
               );
               if (dup.length) continue;
               const click = crypto.randomBytes(8).toString("hex");
