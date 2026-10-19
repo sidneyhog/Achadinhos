@@ -291,3 +291,11 @@ test("variações do mesmo anúncio contam como repetição", async () => {
   );
   assert.notEqual(titleKey("Tênis Kappa Park 2.0 Original Unissex"), titleKey("Tênis Casual Kappa Zenit Masculino"));
 });
+
+test("Status: agenda do celular entra antes dos grupos e a lista para no teto", async () => {
+  const { orderAudience } = await import("../src/deals/statusPolicy");
+  const agenda = ["10@lid", "11:2@lid"];
+  const grupos = ["20@lid", "10@lid", "99@lid", "5519999990000@s.whatsapp.net"];
+  assert.deepEqual(orderAudience([agenda, grupos], "99@lid", 10), ["10@lid", "11@lid", "20@lid"], "sem repetir, sem o próprio número e só LID");
+  assert.deepEqual(orderAudience([agenda, grupos], "", 2), ["10@lid", "11@lid"], "com o teto cheio, a agenda fica e os grupos saem");
+});

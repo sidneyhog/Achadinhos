@@ -16,7 +16,7 @@ import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
-import { STATUS_JID, STATUS_LIMITS, statusRecipients } from "../deals/statusPolicy";
+import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
   resolveMlTracking,
@@ -141,46 +141,60 @@ const statusWait = (cadence: Record<string, number>, marketplace: string) => cad
 
 /** Quem vê o Status: agenda do celular (como "Meus contatos"), participantes dos grupos e contatos da Base, sem repetir. */
 const statusAudience = async (companyId: number, whatsappId: number, groups: Array<{ group_jid: string }>) => {
-  const fromGroups = groups.length ? await loadStatusRecipients(whatsappId, groups) : [];
-  const contacts = await q<{ phone: string }>(
-    "SELECT phone FROM contacts WHERE company_id = $1 AND blocked = false AND anonymized_at IS NULL AND phone ~ '^[0-9]{10,15}$' ORDER BY updated_at DESC LIMIT $2",
-    [companyId, STATUS_LIMITS.maxRecipients]
-  );
   const own = getLive(whatsappId)?.client;
   const creds = own?.getCredentials?.() || own?.auth?.getCredentials?.() || null;
-  const extra = statusRecipients(contacts.map(row => ({ jid: `${row.phone}@s.whatsapp.net` })), [creds?.meJid || ""]);
-  // O Status sai pelo LID da conta; o WhatsApp recusa (erro 400) lista com número de telefone misturado.
-  // Converte os números para LID e descarta quem não tem LID conhecido.
-  const lids = new Set<string>();
-  const phones: string[] = [];
-  // A agenda vem primeiro: são as pessoas que o próprio WhatsApp do celular usaria no "Meus contatos".
-  const book = await q<{ lid: string | null; phone: string | null }>(
-    "SELECT lid, phone FROM wa_address_book WHERE whatsapp_id = $1 ORDER BY updated_at DESC LIMIT $2",
-    [whatsappId, STATUS_SEND_CAP * 2]
-  );
-  for (const row of book) {
-    if (row.lid) lids.add(row.lid);
-    else if (row.phone) phones.push(row.phone);
-  }
-  for (const jid of [...fromGroups, ...extra]) {
-    if (jid.endsWith("@lid")) lids.add(jid);
-    else phones.push(jid.split("@")[0]);
-  }
   const lookup = own?.profile?.getLidsByPhoneNumbers;
-  if (lookup) {
-    for (let i = 0; i < phones.length && lids.size < STATUS_SEND_CAP; i += 100) {
+  // O Status sai pelo LID da conta; o WhatsApp recusa (erro 400) lista com número de telefone misturado.
+  // Números viram LID aqui, em lotes, só até ter gente suficiente.
+  const toLids = async (phones: string[], room: number) => {
+    const out: string[] = [];
+    if (!lookup) return out;
+    for (let i = 0; i < phones.length && out.length < room; i += 100) {
       try {
         const found = await lookup(phones.slice(i, i + 100));
         for (const row of found) {
-          if (row.exists !== false && row.lidJid) lids.add(`${row.lidJid.split("@")[0].split(":")[0]}@lid`);
+          if (row.exists !== false && row.lidJid) out.push(`${row.lidJid.split("@")[0].split(":")[0]}@lid`);
         }
       } catch {
         /* lote sem resposta: segue com os outros */
       }
     }
+    return out;
+  };
+  // 1) Agenda do celular: quem tem o número salvo é quem o WhatsApp deixa ver o Status.
+  // A agenda chega sem LID (só telefone), então precisa ser convertida antes de entrar na fila;
+  // antes ela ia para o fim e os participantes dos grupos ocupavam as 1000 vagas.
+  const book = await q<{ lid: string | null; phone: string | null }>(
+    "SELECT lid, phone FROM wa_address_book WHERE whatsapp_id = $1 ORDER BY updated_at DESC LIMIT $2",
+    [whatsappId, STATUS_SEND_CAP * 3]
+  );
+  const bookLids = book.filter(row => row.lid).map(row => String(row.lid));
+  const bookFromPhones = await toLids(
+    book.filter(row => !row.lid && row.phone).map(row => String(row.phone)),
+    STATUS_SEND_CAP - bookLids.length
+  );
+  // 2) Participantes dos grupos da conexão.
+  const fromGroups = groups.length ? await loadStatusRecipients(whatsappId, groups) : [];
+  const groupLids = fromGroups.filter(jid => jid.endsWith("@lid"));
+  // 3) Contatos da Base, se ainda sobrar vaga.
+  const tiers = [bookLids, bookFromPhones, groupLids];
+  const taken = orderAudience(tiers, creds?.meLid || "", STATUS_SEND_CAP).length;
+  if (taken < STATUS_SEND_CAP) {
+    const contacts = await q<{ phone: string }>(
+      "SELECT phone FROM contacts WHERE company_id = $1 AND blocked = false AND anonymized_at IS NULL AND phone ~ '^[0-9]{10,15}$' ORDER BY updated_at DESC LIMIT $2",
+      [companyId, STATUS_LIMITS.maxRecipients]
+    );
+    const phones = [
+      ...fromGroups.filter(jid => !jid.endsWith("@lid")).map(jid => jid.split("@")[0]),
+      ...contacts.map(row => row.phone)
+    ];
+    tiers.push(await toLids(phones, STATUS_SEND_CAP - taken));
   }
-  const meLid = String(creds?.meLid || "").split("@")[0].split(":")[0];
-  return [...lids].filter(jid => jid.split("@")[0] !== meLid).slice(0, STATUS_SEND_CAP);
+  const audience = orderAudience(tiers, creds?.meLid || "", STATUS_SEND_CAP);
+  console.log(
+    `[status] conexão ${whatsappId}: ${audience.length} pessoas (agenda ${bookLids.length + bookFromPhones.length} de ${book.length}, grupos ${groupLids.length})`
+  );
+  return audience;
 };
 
 /**

@@ -38,6 +38,26 @@ export const statusAllowed = (input: {
 };
 
 /**
+ * Junta as listas de LIDs em ordem de prioridade (agenda, grupos, Base), sem repetir, sem o
+ * próprio número e até `cap`. O WhatsApp só mostra o Status a quem salvou o número, por isso
+ * a agenda do celular vem antes dos participantes dos grupos.
+ */
+export const orderAudience = (tiers: string[][], meLid: string, cap: number) => {
+  const me = String(meLid || "").split("@")[0].split(":")[0];
+  const out = new Set<string>();
+  for (const tier of tiers) {
+    for (const jid of tier) {
+      if (out.size >= cap) return [...out];
+      if (!jid.endsWith("@lid")) continue;
+      const user = jid.split("@")[0].split(":")[0];
+      if (!user || user === me) continue;
+      out.add(`${user}@lid`);
+    }
+  }
+  return [...out];
+};
+
+/**
  * O Status só chega a quem estiver na lista de envio. Usa os participantes dos
  * grupos da conexão (LID quando houver, como o próprio WhatsApp faz), sem repetir
  * e sem o próprio número.
