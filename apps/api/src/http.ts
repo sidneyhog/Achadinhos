@@ -163,7 +163,23 @@ const assertRoom = async (companyId: number, kind: "connections" | "groups" | "s
   const extra = kind === "stores" || kind === "groups" ? " AND enabled = true" : "";
   const [{ count }] = await q<{ count: string }>(`SELECT count(*)::text AS count FROM ${table} WHERE company_id = $1${extra}`, [companyId]);
   const labels = { connections: "conexões", groups: "grupos", stores: "lojas", users: "usuários" };
-  if (Number(count) >= cap) throw Object.assign(new Error(`O plano permite até ${cap} ${labels[kind]}`), { status: 402 });
+  if (Number(count) < cap) return;
+  if (kind === "groups") {
+    // O limite vale para a empresa toda, mas o painel mostra os grupos de uma conexão por vez:
+    // sem dizer onde estão os outros, parecia que o plano bloqueava antes da hora.
+    const rows = await q<{ name: string; count: string }>(
+      `SELECT coalesce(w.name, 'sem conexão') AS name, count(*)::text AS count
+       FROM groups g LEFT JOIN whatsapp_sessions w ON w.id = g.whatsapp_id
+       WHERE g.company_id = $1 AND g.enabled = true GROUP BY w.name ORDER BY count(*) DESC`,
+      [companyId]
+    );
+    const where = rows.map(row => `${row.count} em ${row.name}`).join(", ");
+    throw Object.assign(
+      new Error(`O plano permite até ${cap} grupos ativos somando todas as conexões, e já há ${count} (${where}). Desative um grupo para ativar outro.`),
+      { status: 402 }
+    );
+  }
+  throw Object.assign(new Error(`O plano permite até ${cap} ${labels[kind]}`), { status: 402 });
 };
 
 const STORES = ["ml", "amazon", "shopee", "aliexpress", "magalu", "rakuten", "awin", "shein", "samsung", "casasbahia", "natura", "paguemenos", "epoca", "terabyte"];
