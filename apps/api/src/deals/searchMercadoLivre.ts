@@ -209,8 +209,17 @@ export const offersFromOffersPage = (
   return { offers: [], how: "", keys, blocked: false };
 };
 
-/** Uma entrada por cookie: o catálogo lido com a sessão de uma empresa não vai para outra. */
-const catalogCache = new Map<string, { at: number; offers: DealOffer[] }>();
+/**
+ * Um catálogo só para todas as empresas. As ofertas do /ofertas são públicas e iguais para todo mundo;
+ * o link de afiliado de cada empresa é aplicado depois, em searchMercadoLivre. Antes cada empresa lia
+ * as mesmas páginas com o próprio cookie, e com N clientes o ML recebia N vezes mais pedidos do mesmo IP.
+ * O cookie da empresa só é usado para buscar as páginas e nunca sai dela.
+ */
+const CATALOG_FRESH_MS = 3 * 60 * 1000;
+const BAD_COOKIE_MS = 10 * 60 * 1000;
+const catalog = { at: 0, offers: [] as DealOffer[], cursor: 0, loading: null as Promise<DealOffer[]> | null };
+/** Cookies que caíram na verificação de conta: não tentam de novo por alguns minutos. */
+const badCookies = new Map<string, number>();
 
 /**
  * O /ofertas tem 20+ páginas de 48 ofertas (19/10/2026), mas ler só as páginas 1 e 2 fazia o robô repetir
@@ -232,8 +241,11 @@ export const sourcesFor = (cursor: number): Array<Record<string, string | number
   ...Array.from({ length: ML_ROTATING_PER_LOAD }, (_, index) => ML_SOURCES[(cursor + index) % ML_SOURCES.length])
 ];
 
-const rotation = new Map<string, number>();
-const pools = new Map<string, Map<string, { at: number; offer: DealOffer }>>();
+const pool = new Map<string, { at: number; offer: DealOffer }>();
+
+/** A API de busca do ML responde 403 para este servidor; depois de um 403, fica uma hora sem tentar. */
+const API_PAUSE_MS = 60 * 60 * 1000;
+let apiPausedUntil = 0;
 
 /** Junta o que acabou de ser lido ao acervo, tira o que ficou velho e devolve do mais novo para o mais antigo. Exportada para teste. */
 export const mergeIntoPool = (
@@ -272,13 +284,20 @@ const pageSummary = (status: number, html: string, items: number): string => {
 };
 
 const loadOfferCatalog = async (cookie = ""): Promise<DealOffer[]> => {
-  const cacheKey = cookie ? createHash("sha256").update(cookie).digest("hex") : "";
-  const cached = catalogCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < 3 * 60 * 1000) {
-    return cached.offers;
-  }
-  const cursor = rotation.get(cacheKey) || 0;
-  rotation.set(cacheKey, (cursor + ML_ROTATING_PER_LOAD) % ML_SOURCES.length);
+  if (catalog.offers.length && Date.now() - catalog.at < CATALOG_FRESH_MS) return catalog.offers;
+  // Várias empresas pedindo ao mesmo tempo: uma leitura serve todas.
+  if (catalog.loading) return catalog.loading;
+  const cookieKey = createHash("sha256").update(cookie).digest("hex");
+  if ((badCookies.get(cookieKey) || 0) > Date.now()) return catalog.offers;
+  catalog.loading = refreshCatalog(cookie, cookieKey).finally(() => {
+    catalog.loading = null;
+  });
+  return catalog.loading;
+};
+
+const refreshCatalog = async (cookie: string, cookieKey: string): Promise<DealOffer[]> => {
+  const cursor = catalog.cursor;
+  catalog.cursor = (cursor + ML_ROTATING_PER_LOAD) % ML_SOURCES.length;
   const settled = await Promise.allSettled(
     sourcesFor(cursor).map(async (params, index) => {
       const page = index + 1;
@@ -304,12 +323,17 @@ const loadOfferCatalog = async (cookie = ""): Promise<DealOffer[]> => {
   const failed = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
   if (failed && settled.every(item => item.status === "rejected")) throw failed.reason;
   const fresh = settled.flatMap(item => (item.status === "fulfilled" ? item.value : []));
-  const pool = pools.get(cacheKey) || new Map();
-  pools.set(cacheKey, pool);
-  // Sessão bloqueada não deve continuar publicando o acervo antigo como se estivesse tudo bem.
-  const offers = fresh.length ? mergeIntoPool(pool, fresh, Date.now()) : [];
-  catalogCache.set(cacheKey, { at: Date.now(), offers });
-  return offers;
+  if (!fresh.length) {
+    // Esta sessão não leu nada (verificação de conta): fica de fora por alguns minutos e quem tem
+    // sessão boa renova o catálogo. O acervo que outras empresas leram continua valendo até 6 horas.
+    badCookies.set(cookieKey, Date.now() + BAD_COOKIE_MS);
+    catalog.offers = mergeIntoPool(pool, [], Date.now());
+    return catalog.offers;
+  }
+  badCookies.delete(cookieKey);
+  catalog.offers = mergeIntoPool(pool, fresh, Date.now());
+  catalog.at = Date.now();
+  return catalog.offers;
 };
 
 export const catalogImageMap = async (cookie = ""): Promise<Map<string, string>> => {
@@ -375,13 +399,16 @@ export const searchMercadoLivre = async (
   cookie = ""
 ): Promise<DealOffer[]> => {
   let offers: DealOffer[] = [];
-  try {
-    offers = await fromApi(query);
-    lastFetch.api = `${offers.length} resultados`;
-  } catch (err) {
-    const status = (err as { response?: { status?: number } }).response?.status;
-    lastFetch.api = status ? `HTTP ${status}` : String((err as Error).message || err).slice(0, 60);
-    offers = [];
+  if (Date.now() >= apiPausedUntil) {
+    try {
+      offers = await fromApi(query);
+      lastFetch.api = `${offers.length} resultados`;
+    } catch (err) {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      lastFetch.api = status ? `HTTP ${status}` : String((err as Error).message || err).slice(0, 60);
+      if (status === 403) apiPausedUntil = Date.now() + API_PAUSE_MS;
+      offers = [];
+    }
   }
   if (!offers.length) offers = await loadOfferCatalog(cookie);
   if (!offers.length) {

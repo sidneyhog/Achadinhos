@@ -299,3 +299,46 @@ test("Status: agenda do celular entra antes dos grupos e a lista para no teto", 
   assert.deepEqual(orderAudience([agenda, grupos], "99@lid", 10), ["10@lid", "11@lid", "20@lid"], "sem repetir, sem o próprio número e só LID");
   assert.deepEqual(orderAudience([agenda, grupos], "", 2), ["10@lid", "11@lid"], "com o teto cheio, a agenda fica e os grupos saem");
 });
+
+test("rodada em paralelo: só começa empresas paradas e respeita as vagas", async () => {
+  const { pickStartable } = await import("../src/engine/runDeals");
+  const companies = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
+  assert.deepEqual(pickStartable(companies, new Set(), 6).map(c => c.id), [1, 2, 3, 4]);
+  assert.deepEqual(pickStartable(companies, new Set([2]), 3).map(c => c.id), [1, 3], "a 2 ainda está rodando e sobram 2 vagas");
+  assert.deepEqual(pickStartable(companies, new Set([1, 2, 3]), 3), [], "sem vaga, ninguém começa");
+});
+
+test("lista do Status guardada vale por algumas horas e lista vazia não fica guardada", async () => {
+  const { audienceFresh, STATUS_AUDIENCE_TTL_MS } = await import("../src/engine/runDeals");
+  const now = 10 * STATUS_AUDIENCE_TTL_MS;
+  assert.equal(audienceFresh({ at: now - 60_000, list: ["1@lid"] }, now), true);
+  assert.equal(audienceFresh({ at: now - STATUS_AUDIENCE_TTL_MS - 1, list: ["1@lid"] }, now), false);
+  assert.equal(audienceFresh({ at: now, list: [] }, now), false);
+  assert.equal(audienceFresh(undefined, now), false);
+});
+
+test("Mercado Livre: uma leitura do catálogo serve todas as empresas", async (t) => {
+  const axios = (await import("axios")).default;
+  const { searchMercadoLivre } = await import("../src/deals/searchMercadoLivre");
+  const card = (id: string) => ({
+    metadata: { id, url: `produto.mercadolivre.com.br/${id}-x` },
+    components: [{ type: "title", title: { text: `Produto ${id}` } }, { type: "price", price: { current_price: { value: 10 } } }]
+  });
+  let pages = 0;
+  const cookies: string[] = [];
+  t.mock.method(axios, "get", async (url: string, config: { headers?: Record<string, string> }) => {
+    if (url.includes("api.mercadolibre.com")) throw Object.assign(new Error("forbidden"), { response: { status: 403 } });
+    pages += 1;
+    cookies.push(String(config?.headers?.Cookie || ""));
+    const ctx = { appProps: { pageProps: { data: { items: [{ card: card(`MLB${pages}`) }] } } } };
+    return { status: 200, data: `<script>__NORDIC_RENDERING_CTX__ = ${JSON.stringify(ctx)};</script>`, request: {} };
+  });
+  const tracking = { params: [["matt_tool", "1"]], code: "" } as never;
+  const [a, b] = await Promise.all([searchMercadoLivre("", tracking, "ssid=empresaA"), searchMercadoLivre("", tracking, "ssid=empresaB")]);
+  assert.equal(pages, 4, "as duas empresas juntas fizeram uma leitura só (página 1 + 3 do rodízio)");
+  assert.ok(cookies.every(cookie => cookie === "ssid=empresaA"), "a leitura usou o cookie de quem pediu primeiro");
+  assert.equal(a.length, 4);
+  assert.equal(b.length, 4);
+  await searchMercadoLivre("", tracking, "ssid=empresaC");
+  assert.equal(pages, 4, "dentro de 3 minutos o catálogo guardado é reaproveitado");
+});

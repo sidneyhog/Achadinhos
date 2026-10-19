@@ -1,6 +1,6 @@
 import { audit, migrate, q } from "./db";
 import { remindDue } from "./reminders";
-import { runDueDeals, statusTest } from "./engine/runDeals";
+import { forgetStatusAudience, runDueDeals, statusTest } from "./engine/runDeals";
 import { tickAudience } from "./engine/audience";
 import { phoneFromParticipant } from "./deals/audiencePolicy";
 import { getRedis } from "./redis";
@@ -137,6 +137,7 @@ if (redis) {
           const [row] = await q<{ id: number; company_id: number; name: string }>("SELECT id, company_id, name FROM whatsapp_sessions WHERE id = $1", [Number(job.sessionId)]);
           if (!row) return reply({ ok: false, error: "Conexão não encontrada" });
           await q("UPDATE whatsapp_sessions SET address_book_synced_at = NULL WHERE id = $1", [row.id]);
+          forgetStatusAudience(row.id);
           await stopSession(row.id);
           await new Promise(resolve => setTimeout(resolve, 2000));
           await q("UPDATE whatsapp_sessions SET status = 'opening' WHERE id = $1", [row.id]);
@@ -236,9 +237,14 @@ const tick = async () => {
   try {
     await suspendExpired();
     await remindDue();
-    const sent = await runDueDeals();
+    // Sem await: cada empresa segue no seu ritmo e o próximo tick só começa as que não estão rodando.
+    void runDueDeals()
+      .then(sent => {
+        if (sent) console.log(`[worker] ofertas=${sent}`);
+      })
+      .catch(err => console.error("[worker] ofertas", err));
     const moved = (await withLock("audience", 90, tickAudience)) ?? 0;
-    if (sent || moved) console.log(`[worker] ofertas=${sent} contatos=${moved}`);
+    if (moved) console.log(`[worker] contatos=${moved}`);
   } catch (err) {
     console.error("[worker]", err);
   } finally {

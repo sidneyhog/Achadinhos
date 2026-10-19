@@ -139,6 +139,31 @@ const loadStatusRecipients = async (whatsappId: number, groups: Array<{ group_ji
 /** Intervalo do Status por loja; sem valor salvo, 1 hora (o mesmo padrão mostrado no painel). */
 const statusWait = (cadence: Record<string, number>, marketplace: string) => cadence[marketplace] || 3600;
 
+/**
+ * A lista de quem vê o Status muda pouco, mas montá-la consulta todos os grupos e faz dezenas de
+ * pedidos de LID ao WhatsApp. Fica guardada por conexão e só é refeita depois de algumas horas.
+ */
+export const STATUS_AUDIENCE_TTL_MS = 6 * 3600_000;
+const audienceCache = new Map<number, { at: number; list: string[]; book: string }>();
+
+/** Lista guardada ainda vale? Lista vazia nunca vale (pode ter sido falha passageira). Exportada para teste. */
+export const audienceFresh = (entry: { at: number; list: string[] } | undefined, now: number, ttl = STATUS_AUDIENCE_TTL_MS) =>
+  Boolean(entry && entry.list.length && now - entry.at < ttl);
+
+/** Esquece a lista guardada (ex.: a agenda foi importada de novo). */
+export const forgetStatusAudience = (whatsappId: number) => audienceCache.delete(whatsappId);
+
+const cachedStatusAudience = async (companyId: number, whatsappId: number, groups: Array<{ group_jid: string }>) => {
+  // Agenda importada de novo (ou pela primeira vez) depois da lista guardada: refaz.
+  const [row] = await q<{ book: string | null }>("SELECT address_book_synced_at::text AS book FROM whatsapp_sessions WHERE id = $1", [whatsappId]);
+  const book = row?.book || "";
+  const entry = audienceCache.get(whatsappId);
+  if (entry && entry.book === book && audienceFresh(entry, Date.now())) return entry.list;
+  const list = await statusAudience(companyId, whatsappId, groups);
+  audienceCache.set(whatsappId, { at: Date.now(), list, book });
+  return list;
+};
+
 /** Quem vê o Status: agenda do celular (como "Meus contatos"), participantes dos grupos e contatos da Base, sem repetir. */
 const statusAudience = async (companyId: number, whatsappId: number, groups: Array<{ group_jid: string }>) => {
   const own = getLive(whatsappId)?.client;
@@ -212,7 +237,7 @@ export const statusTest = async (companyId: number, whatsappId: number, phone: s
   if (!found || found.exists === false || !found.lidJid) throw new Error("Esse número não tem WhatsApp ou o WhatsApp não informou o LID dele.");
   const lid = `${found.lidJid.split("@")[0].split(":")[0]}@lid`;
   const groups = await q<{ group_jid: string }>("SELECT group_jid FROM groups WHERE company_id = $1 AND whatsapp_id = $2 AND enabled = true", [companyId, whatsappId]);
-  const audience = await statusAudience(companyId, whatsappId, groups);
+  const audience = await cachedStatusAudience(companyId, whatsappId, groups);
   await sendStatus(whatsappId, [lid], null, `✅ Teste do Status do Achadinhos\n\nSe você está vendo isto, o Status chega até você. (${new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo" })})`);
   return { lid, inAudience: audience.includes(lid), audienceSize: audience.length };
 };
@@ -307,16 +332,32 @@ const subscriptionOpen = (row: { status: string; company_status: string; trial_e
   return false;
 };
 
+type CompanyRow = {
+  id: number;
+  company_status: string;
+  sub_status: string;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  max_posts_per_day: number | null;
+  max_posts_per_month: number | null;
+};
+
+/** Rodadas em andamento neste processo, por empresa. */
+const inFlight = new Map<number, Promise<number>>();
+
+/** Quantas empresas rodam ao mesmo tempo. As demais entram no próximo tick. */
+export const DEALS_PARALLEL = Math.max(1, Number(process.env.DEALS_PARALLEL) || 6);
+
+/** Quais empresas começam agora: as que não estão rodando, até completar as vagas. Exportada para teste. */
+export const pickStartable = <T extends { id: number }>(companies: T[], running: ReadonlySet<number>, slots: number) =>
+  companies.filter(company => !running.has(company.id)).slice(0, Math.max(0, slots - running.size));
+
+/**
+ * Cada empresa roda sozinha: as pausas entre envios de uma (20 s por grupo) não seguram as outras.
+ * Antes o laço era em fila e uma empresa com muitos grupos atrasava todas as outras.
+ */
 export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
-  const companies = await q<{
-    id: number;
-    company_status: string;
-    sub_status: string;
-    trial_ends_at: string | null;
-    current_period_end: string | null;
-    max_posts_per_day: number | null;
-    max_posts_per_month: number | null;
-  }>(
+  const companies = await q<CompanyRow>(
     `SELECT c.id, c.status AS company_status, s.status AS sub_status, s.trial_ends_at, s.current_period_end, p.max_posts_per_day, p.max_posts_per_month
      FROM companies c
      JOIN subscriptions s ON s.company_id = c.id
@@ -325,10 +366,18 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
     [onlyCompanyId ?? null]
   );
 
+  const runs = pickStartable(companies, new Set(inFlight.keys()), DEALS_PARALLEL).map(company => {
+    const run = runCompany(company).finally(() => inFlight.delete(company.id));
+    inFlight.set(company.id, run);
+    return run;
+  });
+  return (await Promise.all(runs)).reduce((sum, value) => sum + value, 0);
+};
+
+const runCompany = async (company: CompanyRow): Promise<number> => {
   let sent = 0;
-  for (const company of companies) {
-   const before = sent;
-   const ran = await withLock(`deals:${company.id}`, 90, async () => {
+  const before = 0;
+  const ran = await withLock(`deals:${company.id}`, 90, async () => {
    await (async () => {
    try {
     if (!subscriptionOpen({ ...company, status: company.sub_status })) {
@@ -635,7 +684,7 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
           );
           if (repeated.length) continue;
           try {
-            pub.recipients ??= await statusAudience(company.id, pub.id, pub.groups);
+            pub.recipients ??= await cachedStatusAudience(company.id, pub.id, pub.groups);
             if (!pub.recipients.length) throw new Error("ninguém para ver: ative um grupo nesta conexão ou traga contatos para a Base");
             // Status só de texto (formato curto); a foto do produto aparece no cartão de prévia do link.
             const preview = await previewOf();
@@ -727,6 +776,5 @@ export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
    return true; // distingue "rodou" de "pulou porque outra rodada segura a trava" (undefined)
    });
    if (ran === undefined) console.log(`[deals] company=${company.id} já está em outra rodada; pulando`);
-  }
   return sent;
 };
