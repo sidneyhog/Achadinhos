@@ -84,6 +84,14 @@ export const migrate = async () => {
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS partner_since TIMESTAMPTZ;
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS partner_cents INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'efi';
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ;
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS tax_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS payment_provider TEXT NOT NULL DEFAULT '';
+    ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS pagbank_token_enc TEXT NOT NULL DEFAULT '';
+    ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS pagbank_sandbox BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS public_url TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS wa_address_book (
       whatsapp_id INTEGER NOT NULL,
       jid TEXT NOT NULL,

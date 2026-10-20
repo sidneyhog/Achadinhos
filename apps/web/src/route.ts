@@ -33,6 +33,7 @@ export const PANEL_PATH = {
   analytics: "/analytics",
   auto: "/automacao",
   help: "/material",
+  billing: "/assinatura",
   config: "/configuracoes"
 } as const;
 

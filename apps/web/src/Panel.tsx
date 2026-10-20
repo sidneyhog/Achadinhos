@@ -4,6 +4,7 @@ import { api, getToken } from "./api";
 import type { Session } from "./App";
 import { Mark } from "./Mark";
 import { StatusTab } from "./StatusTab";
+import { BillingView } from "./BillingView";
 import { go, PANEL_PATH, usePath } from "./route";
 
 const STORES = [
@@ -35,6 +36,7 @@ const NAV = [
   ["analytics", "Analytics"],
   ["auto", "Automação"],
   ["help", "Material de apoio"],
+  ["billing", "Minha assinatura"],
   ["config", "Configurações"]
 ] as const;
 
@@ -178,6 +180,7 @@ const Icon = ({ name }: { name: string }) => {
   if (name === "analytics") return <svg {...common}><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-6" /></svg>;
   if (name === "auto") return <svg {...common}><rect x="3" y="4" width="6" height="5" rx="1" /><rect x="15" y="15" width="6" height="5" rx="1" /><path d="M6 9v3h12V9" /><path d="M18 12v3" /></svg>;
   if (name === "config") return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></svg>;
+  if (name === "billing") return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h4" /></svg>;
   if (name === "menu") return <svg {...common}><path d="M4 7h16M4 12h16M4 17h16" /></svg>;
   if (name === "help") return <svg {...common}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>;
   return <svg {...common}><circle cx="12" cy="12" r="8" /></svg>;
@@ -824,7 +827,7 @@ function MoveBoard({ job, events, online, onRefresh, onError }: { job: any; even
   );
 }
 
-export function Panel({ session, onLogout, onReturn }: { session: Session; onLogout: () => void; onRefresh?: () => Promise<unknown>; onReturn?: () => void }) {
+export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Session; onLogout: () => void; onRefresh?: () => Promise<unknown>; onReturn?: () => void }) {
   const path = usePath();
   const view: View = path.startsWith("/configuracoes") ? "config" : (Object.entries(PANEL_PATH).find(([, href]) => href === path || path.startsWith(`${href}/`))?.[0] as View) || "dash";
   const setView = (id: View) => go(id === "config" ? "/configuracoes/envio" : PANEL_PATH[id]);
@@ -1291,6 +1294,17 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
           </div>
         </header>
         <div className="aff-body">
+          {(() => {
+            // Aviso de pagamento: vence em até 3 dias, já venceu ou está suspensa. Leva para "Minha assinatura".
+            const sub = session.subscription;
+            if (!sub || view === "billing" || session.user.role === "member") return null;
+            const ends = sub.status === "trialing" ? sub.trial_ends_at : sub.current_period_end;
+            const left = ends ? Math.ceil((new Date(ends).getTime() - Date.now()) / 86400000) : null;
+            const suspended = sub.company_status === "suspended";
+            if (!suspended && (left == null || left > 3)) return null;
+            const text = suspended ? "Sua conta está suspensa e o robô parou." : left! <= 0 ? (sub.status === "trialing" ? "Seu teste grátis terminou." : "Sua assinatura venceu.") : `${sub.status === "trialing" ? "Seu teste grátis" : "Sua assinatura"} vence em ${left} dia${left === 1 ? "" : "s"}.`;
+            return <div className="aff-banner"><strong>{text}</strong> Pague com Pix e a liberação é na hora.<button type="button" onClick={() => setView("billing")}>Pagar agora</button></div>;
+          })()}
           {session.user.role === "member" ? <div className="aff-banner">Sua conta é só de leitura. Quem altera a operação é o dono ou um gerente.</div> : null}
           {feed.map((item) => (
             <div key={item.id} className="aff-banner">
@@ -2326,6 +2340,8 @@ export function Panel({ session, onLogout, onReturn }: { session: Session; onLog
               </section>
             </section>
           )}
+
+          {view === "billing" && <BillingView onPaid={async () => { await onRefresh?.(); }} tell={tell} />}
 
           {view === "help" && (
             <div className="aff-guide-wrap">

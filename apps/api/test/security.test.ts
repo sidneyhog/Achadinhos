@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import pg from "pg";
+import http from "node:http";
 
 if (!process.env.DATABASE_URL) throw new Error("Defina DATABASE_URL apontando para um banco de teste descartável");
 if (process.env.ALLOW_TEST_DB !== "yes") throw new Error("Defina ALLOW_TEST_DB=yes para confirmar que o banco é descartável");
@@ -22,6 +23,31 @@ const ADMIN_EMAIL = `admin-${randomBytes(3).toString("hex")}@test.local`;
 const ADMIN_PASSWORD = `Adm-${randomBytes(6).toString("hex")}`;
 const WEBHOOK_SECRET = `wh-${randomBytes(12).toString("hex")}`;
 const db = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+
+// PagBank simulado: cria pedidos com QR e responde a consulta; o teste marca o pedido como pago.
+const PAGBANK_PORT = PORT + 7;
+const pagbankOrders = new Map<string, { amount: number; paid: boolean }>();
+const pagbankMock = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", chunk => { body += chunk; });
+  req.on("end", () => {
+    res.setHeader("content-type", "application/json");
+    if (req.headers.authorization !== "Bearer token-teste") { res.statusCode = 401; return res.end("{}"); }
+    if (req.method === "POST" && req.url === "/orders") {
+      const input = JSON.parse(body);
+      const id = `ORDE_${randomBytes(6).toString("hex")}`;
+      pagbankOrders.set(id, { amount: input.qr_codes[0].amount.value, paid: false });
+      return res.end(JSON.stringify({ id, qr_codes: [{ id: "QRCO_1", text: `00020101PIX-${id}`, links: [] }] }));
+    }
+    const order = pagbankOrders.get(String(req.url).split("/").pop() || "");
+    if (req.method === "GET" && order) {
+      return res.end(JSON.stringify({ charges: order.paid ? [{ status: "PAID", amount: { value: order.amount, summary: { paid: order.amount } } }] : [] }));
+    }
+    res.statusCode = 404;
+    res.end("{}");
+  });
+});
+process.env.PAGBANK_API_URL = `http://127.0.0.1:${PAGBANK_PORT}`;
 
 let server: ChildProcess | null = null;
 let serverLog = "";
@@ -94,6 +120,7 @@ const registerOwner = async () => {
 };
 
 before(async () => {
+  await new Promise<void>(resolve => pagbankMock.listen(PAGBANK_PORT, "127.0.0.1", () => resolve()));
   await startServer();
   const login = await call("/api/auth/login", { method: "POST", body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
   assert.equal(login.status, 200, "login do super admin");
@@ -108,6 +135,7 @@ before(async () => {
 });
 
 after(async () => {
+  pagbankMock.close();
   killAll();
   await db.end();
 });
@@ -191,6 +219,51 @@ describe("parceiros e comissão por indicação", () => {
     const plain = await registerOwner();
     const none = await db.query("SELECT partner_id FROM companies WHERE id = $1", [plain.companyId]);
     assert.equal(none.rows[0].partner_id, null);
+  });
+});
+
+describe("cobrança pelo PagBank", () => {
+  test("Pix gerado na tela, reaproveitado, confirmado pelo aviso conferido no PagBank e sem repetir", async () => {
+    const saved = await call("/api/admin/platform", { method: "PUT", token: adminToken, body: { pagbankToken: "token-teste", pagbankSandbox: true, paymentProvider: "pagbank" } });
+    assert.equal(saved.status, 200, JSON.stringify(saved.json));
+    try {
+      const owner = await registerOwner();
+      const billing = await call("/api/billing", { token: owner.token });
+      assert.equal(billing.json.provider, "pagbank");
+
+      const noDoc = await call("/api/billing/checkout", { method: "POST", token: owner.token, body: { cycle: "monthly" } });
+      assert.equal(noDoc.status, 400, "sem CPF/CNPJ não gera");
+      const first = await call("/api/billing/checkout", { method: "POST", token: owner.token, body: { cycle: "monthly", taxId: "529.982.247-25" } });
+      assert.equal(first.status, 200, JSON.stringify(first.json));
+      const invoice = first.json.invoice as { id: number; qrText: string; qrImage: string; amountCents: number; status: string };
+      assert.equal(invoice.amountCents, 4990);
+      assert.match(invoice.qrText, /^00020101PIX-ORDE_/);
+      assert.match(invoice.qrImage, /^data:image\/png;base64,/);
+      const again = await call("/api/billing/checkout", { method: "POST", token: owner.token, body: { cycle: "monthly" } });
+      assert.equal((again.json.invoice as { id: number }).id, invoice.id, "mesmo ciclo e valor reaproveita o Pix válido (e o CPF salvo)");
+
+      const pending = await call(`/api/billing/invoices/${invoice.id}?check=1`, { token: owner.token });
+      assert.equal((pending.json.invoice as { status: string }).status, "pending");
+
+      const forged = await call("/api/billing/pagbank/webhook", { method: "POST", body: { id: [...pagbankOrders.keys()].pop(), charges: [{ status: "PAID" }] } });
+      assert.equal(forged.status, 200);
+      const stillTrial = await db.query("SELECT status FROM subscriptions WHERE company_id = $1", [owner.companyId]);
+      assert.equal(stillTrial.rows[0].status, "trialing", "aviso falso não libera: o PagBank ainda diz que não pagou");
+
+      const { rows: [inv] } = await db.query("SELECT external_id FROM invoices WHERE id = $1", [invoice.id]);
+      pagbankOrders.get(inv.external_id)!.paid = true;
+      await call("/api/billing/pagbank/webhook", { method: "POST", body: { id: inv.external_id } });
+      await call("/api/billing/pagbank/webhook", { method: "POST", body: { id: inv.external_id } });
+      const { rows: [sub] } = await db.query("SELECT status, current_period_end > trial_ends_at + interval '29 days' AS kept_trial FROM subscriptions WHERE company_id = $1", [owner.companyId]);
+      assert.equal(sub.status, "active");
+      assert.equal(sub.kept_trial, true, "os dias de teste que faltavam não se perdem");
+      const events = await db.query("SELECT count(*)::int AS n FROM payment_events WHERE company_id = $1 AND kind = 'paid'", [owner.companyId]);
+      assert.equal(events.rows[0].n, 1, "aviso repetido não renova duas vezes");
+      const screen = await call(`/api/billing/invoices/${invoice.id}`, { token: owner.token });
+      assert.equal((screen.json.invoice as { status: string }).status, "paid");
+    } finally {
+      await call("/api/admin/platform", { method: "PUT", token: adminToken, body: { paymentProvider: "" } });
+    }
   });
 });
 

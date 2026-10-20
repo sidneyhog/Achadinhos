@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import { audit, one, q, withTransaction } from "./db";
 import { decrypt, encrypt } from "./secrets";
 import { createBoleto, createCard, createPix, efiConfigured, testEfiConnection } from "./efi";
+import { createPagbankPix, getPagbankOrder, loadPagbank, pagbankError, testPagbank } from "./pagbank";
 import { loadEfiRuntime, loadPlatform } from "./platform";
 import { stopSession } from "./zapo/session";
 import { askWorker } from "./zapo/bridge";
@@ -636,7 +637,11 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
         smtpPort: platform.smtp_port || 587,
         smtpUser: platform.smtp_user || "",
         smtpFrom: platform.smtp_from || "",
-        smtpSet: Boolean(platform.smtp_pass_enc || platform.smtp_host)
+        smtpSet: Boolean(platform.smtp_pass_enc || platform.smtp_host),
+        paymentProvider: platform.payment_provider || "",
+        pagbankSet: Boolean(platform.pagbank_token_enc),
+        pagbankSandbox: platform.pagbank_sandbox !== false,
+        publicUrl: platform.public_url || ""
       },
       reminders: await q("SELECT n.id, c.name AS company, n.title, n.status, n.channel, n.detail, n.created_at FROM notices n JOIN companies c ON c.id = n.company_id ORDER BY n.id DESC LIMIT 40"),
       testimonials: await q("SELECT * FROM testimonials ORDER BY sort_order, id")
@@ -696,6 +701,15 @@ app.put("/api/admin/platform", auth, admin, async (req, res) => {
   const smtpFrom = req.body?.smtpFrom == null ? current.smtp_from : String(req.body.smtpFrom).trim();
   const smtpPass = String(req.body?.smtpPass || "").trim();
   const smtpPassEnc = smtpPass ? encrypt(smtpPass) : current.smtp_pass_enc;
+  // PagBank: token cifrado (em branco mantém o atual), ambiente, qual cobrança está ativa e o endereço público do site.
+  const pagbankToken = String(req.body?.pagbankToken || "").trim();
+  const paymentProvider = req.body?.paymentProvider == null ? current.payment_provider : (["pagbank", "efi"].includes(String(req.body.paymentProvider)) ? String(req.body.paymentProvider) : "");
+  const publicUrl = req.body?.publicUrl == null ? current.public_url : String(req.body.publicUrl).trim().replace(/\/+$/, "");
+  if (publicUrl && !/^https:\/\/[^\s/]+$/i.test(publicUrl)) return res.status(400).json({ error: "O endereço do site precisa ser https://dominio, sem barra no fim" });
+  await q(
+    "UPDATE platform_settings SET payment_provider = $1, pagbank_token_enc = $2, pagbank_sandbox = $3, public_url = $4 WHERE id = 1",
+    [paymentProvider, pagbankToken ? encrypt(pagbankToken) : current.pagbank_token_enc, req.body?.pagbankSandbox == null ? current.pagbank_sandbox : Boolean(req.body.pagbankSandbox), publicUrl]
+  );
   await q(
     `UPDATE platform_settings SET efi_client_id = $1, efi_client_secret_enc = $2, efi_pix_key = $3, efi_sandbox = $4, efi_webhook_url = $5,
       trial_days_default = $6, warn_days = $7, block_after_days = $8, smtp_host = $9, smtp_port = $10, smtp_user = $11, smtp_pass_enc = $12, smtp_from = $13, updated_at = now() WHERE id = 1`,
@@ -703,6 +717,15 @@ app.put("/api/admin/platform", auth, admin, async (req, res) => {
   );
   await audit(null, (req as Request & { auth: AuthUser }).auth.id, "platform", "Configuração da plataforma atualizada", ipOf(req));
   res.json({ ok: true });
+});
+
+app.post("/api/admin/pagbank/test", auth, admin, async (req, res) => {
+  try {
+    const result = await testPagbank();
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
 });
 
 app.post("/api/admin/efi/test", auth, admin, async (req, res) => {
@@ -1824,36 +1847,231 @@ app.post("/api/audience/jobs/:id/stop", auth, async (req, res, next) => {
   }
 });
 
-app.post("/api/billing/checkout", auth, async (req, res, next) => {
+const CYCLE_DAYS: Record<string, number> = { monthly: 30, quarterly: 90, semiannual: 180, yearly: 365 };
+const PIX_MINUTES = 30;
+
+type CheckoutSub = { plan_id: number; slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; name: string; plan_name: string; tax_id: string };
+
+const loadCheckoutSub = (companyId: number) => one<CheckoutSub>(
+  `SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name, p.name AS plan_name, c.tax_id
+   FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
+  [companyId]
+);
+
+const cyclePrice = (sub: CheckoutSub, cycle: string) =>
+  ({ monthly: sub.monthly_cents, quarterly: sub.quarterly_cents, semiannual: sub.semiannual_cents, yearly: sub.yearly_cents } as Record<string, number | null>)[cycle] ?? null;
+
+/** Valida o cupom e devolve o valor com desconto. Não reserva o uso (isso só acontece quando a cobrança é criada). */
+const priceWithCoupon = async (sub: CheckoutSub, amount: number, rawCode: unknown) => {
+  const code = String(rawCode || "").trim().toUpperCase();
+  if (!code) return { amount, couponId: null as number | null };
+  const coupon = await one<{ id: number; kind: string; percent: number | null; amount_cents: number | null; plan_slug: string; max_uses: number | null; used_count: number }>(
+    "SELECT id, kind, percent, amount_cents, plan_slug, max_uses, used_count FROM coupons WHERE upper(code) = $1 AND active = true AND (expires_at IS NULL OR expires_at > now())",
+    [code]
+  );
+  if (!coupon) throw Object.assign(new Error("Cupom inválido ou vencido"), { status: 400 });
+  if (coupon.plan_slug && coupon.plan_slug !== sub.slug) throw Object.assign(new Error("Este cupom não vale para o plano atual"), { status: 400 });
+  if (coupon.max_uses != null && coupon.used_count >= coupon.max_uses) throw Object.assign(new Error("Este cupom esgotou"), { status: 400 });
+  const discounted = coupon.kind === "amount"
+    ? Math.max(0, amount - Number(coupon.amount_cents || 0))
+    : Math.max(0, Math.round(amount * (100 - Number(coupon.percent || 0)) / 100));
+  return { amount: discounted, couponId: coupon.id };
+};
+
+// Reserva o uso numa única instrução: duas compras simultâneas não passam do limite do cupom.
+const reserveCoupon = async (couponId: number | null) => {
+  if (!couponId) return;
+  const reserved = await one("UPDATE coupons SET used_count = used_count + 1 WHERE id = $1 AND (max_uses IS NULL OR used_count < max_uses) RETURNING id", [couponId]);
+  if (!reserved) throw Object.assign(new Error("Este cupom esgotou"), { status: 400 });
+};
+
+const publicOrigin = (req: Request, saved: string) => {
+  if (/^https:\/\//i.test(saved)) return saved;
+  const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "").split(",")[0].trim();
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+  return proto === "https" && host && !host.includes(":") ? `https://${host}` : "";
+};
+
+/** O que a tela do cliente precisa de uma cobrança. */
+const invoiceView = (row: { id: number; amount_cents: number; cycle: string; status: string; provider: string; payload: unknown; expires_at: string | null; paid_at: string | null; created_at?: string }) => {
+  const payload = (row.payload || {}) as { qrText?: string; qrImage?: string; qrcode?: string };
+  return {
+    id: row.id,
+    amountCents: row.amount_cents,
+    cycle: row.cycle,
+    status: row.status,
+    provider: row.provider,
+    qrText: payload.qrText || payload.qrcode || "",
+    qrImage: payload.qrImage || "",
+    expiresAt: row.expires_at,
+    paidAt: row.paid_at,
+    createdAt: row.created_at || null
+  };
+};
+
+const INVOICE_COLUMNS = "id, company_id, amount_cents, cycle, status, provider, payload, external_id, expires_at, paid_at, checked_at, created_at";
+
+/** Consulta a cobrança no PagBank e, se paga com o valor certo, libera a assinatura. */
+const refreshPagbankInvoice = async (inv: { id: number; company_id: number; external_id: string | null; amount_cents: number; status: string; expires_at: string | null }) => {
+  if (inv.status !== "pending" || !inv.external_id) return inv.status;
+  const order = await getPagbankOrder(inv.external_id);
+  await q("UPDATE invoices SET checked_at = now() WHERE id = $1", [inv.id]);
+  if (order.paid) {
+    if (order.paidCents && order.paidCents !== Number(inv.amount_cents)) {
+      await q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'amount_mismatch',$3::jsonb)", [inv.company_id, inv.id, JSON.stringify({ provider: "pagbank", order: inv.external_id, paidCents: order.paidCents })]);
+      await audit(inv.company_id, null, "payment", `PagBank: valor pago ${order.paidCents} diferente da fatura ${inv.id}`);
+      return "mismatch";
+    }
+    await settleInvoice(inv.id, { provider: "pagbank", order: inv.external_id, paidCents: order.paidCents });
+    return "paid";
+  }
+  if (inv.expires_at && new Date(inv.expires_at).getTime() < Date.now() - 60_000) {
+    await q("UPDATE invoices SET status = 'expired' WHERE id = $1 AND status = 'pending'", [inv.id]);
+    return "expired";
+  }
+  return "pending";
+};
+
+app.get("/api/billing", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
-    if (!(await efiConfigured())) {
-      return res.json({ configured: false, message: "EFI ainda não está configurado. O teste grátis segue ativo." });
-    }
-    const method = String(req.body?.method || "pix");
-    if (!["pix", "card", "boleto"].includes(method)) return res.status(400).json({ error: "Método inválido" });
-    const cycle = ["monthly", "quarterly", "semiannual", "yearly"].includes(String(req.body?.cycle)) ? String(req.body.cycle) : "monthly";
-    const sub = await one<{ plan_id: number; slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; name: string }>(
-      "SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1",
+    const pag = await loadPagbank();
+    const provider = pag.active && pag.token ? "pagbank" : (await efiConfigured()) ? "efi" : null;
+    const sub = await one<{ status: string; cycle: string | null; trial_ends_at: string | null; current_period_end: string | null; company_status: string; tax_id: string; plan_name: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
+      `SELECT s.status, s.cycle, s.trial_ends_at, s.current_period_end, c.status AS company_status, c.tax_id, p.name AS plan_name,
+              p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents
+       FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
       [companyId]
     );
     if (!sub) return res.status(404).json({ error: "Sem assinatura" });
-    const prices: Record<string, number | null> = { monthly: sub.monthly_cents, quarterly: sub.quarterly_cents, semiannual: sub.semiannual_cents, yearly: sub.yearly_cents };
-    let amount = prices[cycle];
-    if (amount == null) return res.status(400).json({ error: "Esse ciclo não tem preço neste plano" });
-    const code = String(req.body?.coupon || "").trim().toUpperCase();
-    if (code) {
-      const coupon = await one<{ id: number; kind: string; percent: number | null; amount_cents: number | null; plan_slug: string; max_uses: number | null; used_count: number }>(
-        "SELECT id, kind, percent, amount_cents, plan_slug, max_uses, used_count FROM coupons WHERE upper(code) = $1 AND active = true AND (expires_at IS NULL OR expires_at > now())",
-        [code]
-      );
-      if (!coupon) return res.status(400).json({ error: "Cupom inválido ou vencido" });
-      if (coupon.plan_slug && coupon.plan_slug !== sub.slug) return res.status(400).json({ error: "Este cupom não vale para o plano atual" });
-      // Reserva o uso numa única instrução: duas compras simultâneas não passam do limite do cupom.
-      const reserved = await one("UPDATE coupons SET used_count = used_count + 1 WHERE id = $1 AND (max_uses IS NULL OR used_count < max_uses) RETURNING id", [coupon.id]);
-      if (!reserved) return res.status(400).json({ error: "Este cupom esgotou" });
-      amount = coupon.kind === "amount" ? Math.max(0, amount - Number(coupon.amount_cents || 0)) : Math.max(0, Math.round(amount * (100 - Number(coupon.percent || 0)) / 100));
+    const open = await one<Parameters<typeof invoiceView>[0]>(
+      `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND status = 'pending' AND provider = 'pagbank' AND expires_at > now() ORDER BY id DESC LIMIT 1`,
+      [companyId]
+    );
+    const history = await q<Parameters<typeof invoiceView>[0]>(
+      `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND status = 'paid' ORDER BY paid_at DESC LIMIT 12`,
+      [companyId]
+    );
+    const digits = String(sub.tax_id || "");
+    res.json({
+      provider,
+      plan: {
+        name: sub.plan_name,
+        prices: { monthly: sub.monthly_cents, quarterly: sub.quarterly_cents, semiannual: sub.semiannual_cents, yearly: sub.yearly_cents }
+      },
+      subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status },
+      taxIdHint: digits ? `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}` : "",
+      open: open ? invoiceView(open) : null,
+      history: history.map(invoiceView)
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/billing/invoices/:id", auth, async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    let inv = await one<Parameters<typeof invoiceView>[0] & { company_id: number; external_id: string | null; checked_at: string | null }>(
+      `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE id = $1 AND company_id = $2`,
+      [Number(req.params.id), companyId]
+    );
+    if (!inv) return res.status(404).json({ error: "Cobrança não encontrada" });
+    // A tela pergunta a cada poucos segundos; o PagBank só é consultado de 8 em 8 s (ou na hora, no "Já paguei").
+    const force = req.query.check === "1";
+    const stale = !inv.checked_at || Date.now() - new Date(inv.checked_at).getTime() > 8000;
+    if (inv.provider === "pagbank" && inv.status === "pending" && (force || stale)) {
+      try {
+        await refreshPagbankInvoice(inv);
+      } catch (err) {
+        if (force) return res.status(502).json({ error: pagbankError(err) });
+      }
+      inv = (await one<typeof inv>(`SELECT ${INVOICE_COLUMNS} FROM invoices WHERE id = $1`, [inv.id]))!;
     }
+    const sub = await one<{ current_period_end: string | null }>("SELECT current_period_end FROM subscriptions WHERE company_id = $1", [companyId]);
+    res.json({ invoice: invoiceView(inv), currentPeriodEnd: sub?.current_period_end || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/billing/checkout", auth, async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    const user = (req as Request & { auth: AuthUser & { name?: string; email?: string } }).auth;
+    const pag = await loadPagbank();
+    const usePagbank = pag.active && Boolean(pag.token);
+    if (!usePagbank && !(await efiConfigured())) {
+      return res.json({ configured: false, message: "O pagamento online ainda não está ativo. Fale com o suporte para pagar." });
+    }
+    const method = usePagbank ? "pix" : String(req.body?.method || "pix");
+    if (!["pix", "card", "boleto"].includes(method)) return res.status(400).json({ error: "Método inválido" });
+    const cycle = CYCLE_DAYS[String(req.body?.cycle)] ? String(req.body.cycle) : "monthly";
+    const sub = await loadCheckoutSub(companyId);
+    if (!sub) return res.status(404).json({ error: "Sem assinatura" });
+    const price = cyclePrice(sub, cycle);
+    if (price == null) return res.status(400).json({ error: "Esse ciclo não tem preço neste plano" });
+    let quote;
+    try {
+      quote = await priceWithCoupon(sub, price, req.body?.coupon);
+    } catch (err) {
+      return res.status(400).json({ error: (err as Error).message });
+    }
+    if (quote.amount < 100) return res.status(400).json({ error: "O valor mínimo para pagar com Pix é R$ 1,00" });
+
+    if (usePagbank) {
+      const taxId = String(req.body?.taxId || "").replace(/\D/g, "") || String(sub.tax_id || "");
+      if (taxId.length !== 11 && taxId.length !== 14) return res.status(400).json({ error: "Informe o CPF ou CNPJ de quem paga" });
+      // Mesmo plano, ciclo e valor com um Pix ainda válido: reaproveita, em vez de criar outro pedido.
+      const open = await one<Parameters<typeof invoiceView>[0]>(
+        `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND provider = 'pagbank' AND status = 'pending' AND cycle = $2 AND amount_cents = $3 AND expires_at > now() + interval '3 minutes' ORDER BY id DESC LIMIT 1`,
+        [companyId, cycle, quote.amount]
+      );
+      if (open) return res.json({ configured: true, provider: "pagbank", invoice: invoiceView(open) });
+      try {
+        await reserveCoupon(quote.couponId);
+      } catch (err) {
+        return res.status(400).json({ error: (err as Error).message });
+      }
+      const expiresAt = new Date(Date.now() + PIX_MINUTES * 60_000);
+      const invoice = await one<{ id: number }>(
+        "INSERT INTO invoices (company_id, plan_id, amount_cents, method, cycle, provider, expires_at) VALUES ($1,$2,$3,'pix',$4,'pagbank',$5) RETURNING id",
+        [companyId, sub.plan_id, quote.amount, cycle, expiresAt]
+      );
+      const origin = publicOrigin(req, pag.publicUrl);
+      try {
+        const order = await createPagbankPix({
+          referenceId: `achadinhos-${invoice!.id}`,
+          amountCents: quote.amount,
+          itemName: `Achadinhos ${sub.plan_name} (${cycle})`,
+          customer: { name: String(user.name || sub.name), email: String(user.email || ""), taxId },
+          expiresAt,
+          notificationUrl: origin ? `${origin}/api/billing/pagbank/webhook` : undefined
+        });
+        if (!order.orderId || !order.qrText) throw new Error("O PagBank não devolveu o QR Code");
+        // A imagem do QR sai daqui (mesmo texto do copia e cola), sem depender do link de imagem do PagBank.
+        const qrcode = await import("qrcode");
+        const toDataURL = qrcode.toDataURL || (qrcode as unknown as { default: typeof qrcode }).default.toDataURL;
+        const qrData = await toDataURL(order.qrText, { margin: 1, width: 300 });
+        const row = await one<Parameters<typeof invoiceView>[0]>(
+          `UPDATE invoices SET external_id = $2, payload = $3::jsonb WHERE id = $1 RETURNING ${INVOICE_COLUMNS}`,
+          [invoice!.id, order.orderId, JSON.stringify({ qrText: order.qrText, qrImage: qrData, qrLink: order.qrImage })]
+        );
+        await q("UPDATE companies SET tax_id = $2 WHERE id = $1", [companyId, taxId]);
+        return res.json({ configured: true, provider: "pagbank", invoice: invoiceView(row!) });
+      } catch (err) {
+        await q("UPDATE invoices SET status = 'failed' WHERE id = $1", [invoice!.id]);
+        if (quote.couponId) await q("UPDATE coupons SET used_count = greatest(0, used_count - 1) WHERE id = $1", [quote.couponId]);
+        return res.status(502).json({ error: pagbankError(err) });
+      }
+    }
+
+    try {
+      await reserveCoupon(quote.couponId);
+    } catch (err) {
+      return res.status(400).json({ error: (err as Error).message });
+    }
+    const amount = quote.amount;
     const txid = crypto.randomBytes(16).toString("hex").slice(0, 26);
     const invoice = await one<{ id: number }>(
       "INSERT INTO invoices (company_id, plan_id, amount_cents, method, cycle, external_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
@@ -1869,7 +2087,7 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
         document: String(req.body?.document || ""),
         paymentToken: String(req.body?.paymentToken || "")
       });
-    } else if (method === "boleto") {
+    } else {
       payload = await createBoleto({
         amountCents: amount,
         name: String(req.body?.name || sub.name),
@@ -1877,12 +2095,28 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
         document: String(req.body?.document || ""),
         expireAt: String(req.body?.expireAt || new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10))
       });
-    } else return res.status(400).json({ error: "Método inválido" });
+    }
     await q("UPDATE invoices SET payload = $2::jsonb WHERE id = $1", [invoice!.id, JSON.stringify(payload)]);
-    res.json({ configured: true, invoiceId: invoice!.id, payload });
+    res.json({ configured: true, provider: "efi", invoiceId: invoice!.id, payload });
   } catch (err) {
     next(err);
   }
+});
+
+/** Aviso do PagBank. O corpo não é confiável: só serve para achar a cobrança, que é conferida direto no PagBank. */
+app.post("/api/billing/pagbank/webhook", async (req, res) => {
+  const orderId = String(req.body?.id || "").slice(0, 80);
+  const reference = String(req.body?.reference_id || "");
+  try {
+    const inv = await one<{ id: number; company_id: number; external_id: string | null; amount_cents: number; status: string; expires_at: string | null }>(
+      "SELECT id, company_id, external_id, amount_cents, status, expires_at FROM invoices WHERE provider = 'pagbank' AND (external_id = $1 OR $2 = 'achadinhos-' || id::text) LIMIT 1",
+      [orderId, reference]
+    );
+    if (inv) await refreshPagbankInvoice(inv);
+  } catch (err) {
+    console.error("[billing] aviso do PagBank", pagbankError(err));
+  }
+  res.json({ ok: true });
 });
 
 /**
@@ -1911,6 +2145,34 @@ const PARTNER_COMMISSION_SQL = `
   FROM companies c JOIN partners p ON p.id = c.partner_id
   WHERE i.id = $1 AND c.id = i.company_id AND p.active = true AND i.status = 'paid'`;
 
+/**
+ * Libera uma fatura paga (EFI, PagBank): renova sem perder os dias que ainda faltavam (inclusive do teste),
+ * reativa a empresa suspensa e grava a comissão do parceiro. Chamar de novo não repete nada.
+ */
+const settleInvoice = async (invoiceId: number, payload: unknown) => {
+  const applied = await withTransaction(async tx => {
+    const inv = await tx.one<{ id: number; company_id: number; cycle: string }>(
+      "UPDATE invoices SET status = 'paid', paid_at = now() WHERE id = $1 AND status <> 'paid' RETURNING id, company_id, cycle",
+      [invoiceId]
+    );
+    if (!inv) return null;
+    const days = CYCLE_DAYS[inv.cycle] || 30;
+    await tx.q(
+      `UPDATE subscriptions SET status = 'active', cycle = $3,
+         current_period_end = GREATEST(now(), coalesce(current_period_end, now()), CASE WHEN status = 'trialing' THEN coalesce(trial_ends_at, now()) ELSE now() END) + ($2 || ' days')::interval,
+         updated_at = now()
+       WHERE company_id = $1`,
+      [inv.company_id, String(days), inv.cycle]
+    );
+    await tx.q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [inv.company_id]);
+    await tx.q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'paid',$3::jsonb)", [inv.company_id, inv.id, JSON.stringify(payload ?? {})]);
+    await tx.q(PARTNER_COMMISSION_SQL, [inv.id]);
+    return inv;
+  });
+  if (applied) await audit(applied.company_id, null, "payment", "Pagamento confirmado");
+  return Boolean(applied);
+};
+
 const billingWebhook = async (req: Request, res: Response) => {
   if (!webhookAllowed(req)) {
     const configured = Boolean(process.env.EFI_WEBHOOK_SECRET);
@@ -1932,20 +2194,7 @@ const billingWebhook = async (req: Request, res: Response) => {
       await audit(invoice.company_id, null, "payment", `Pagamento recusado: valor ${String(item.valor ?? "")} diferente da fatura ${invoice.id}`);
       continue;
     }
-    const days = invoice.cycle === "yearly" ? 365 : invoice.cycle === "semiannual" ? 180 : invoice.cycle === "quarterly" ? 90 : 30;
-    const applied = await withTransaction(async tx => {
-      const updated = await tx.one("UPDATE invoices SET status = 'paid', paid_at = now() WHERE id = $1 AND status <> 'paid' RETURNING id", [invoice.id]);
-      if (!updated) return false;
-      await tx.q(
-        "UPDATE subscriptions SET status = 'active', current_period_end = now() + ($2 || ' days')::interval, updated_at = now() WHERE company_id = $1",
-        [invoice.company_id, String(days)]
-      );
-      await tx.q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [invoice.company_id]);
-      await tx.q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'paid',$3::jsonb)", [invoice.company_id, invoice.id, JSON.stringify(item)]);
-      await tx.q(PARTNER_COMMISSION_SQL, [invoice.id]);
-      return true;
-    });
-    if (applied) await audit(invoice.company_id, null, "payment", "Pagamento confirmado");
+    await settleInvoice(invoice.id, item);
   }
   res.json({ ok: true });
 };

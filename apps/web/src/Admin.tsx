@@ -4,6 +4,7 @@ import { api } from "./api";
 import type { Session } from "./App";
 import { Mark } from "./Mark";
 import { AdminPartners } from "./AdminPartners";
+import { AdminPagbank } from "./AdminPagbank";
 import { ADMIN_PATH, go, usePath } from "./route";
 import "./admin.css";
 
@@ -40,7 +41,7 @@ const SUBTITLE: Record<(typeof NAV)[number][0], string> = {
   logs: "Erros do robô e eventos de pagamento.",
   audit: "Quem fez o quê, em qual empresa.",
   quotes: "O que aparece na página inicial.",
-  efi: "Cobrança PIX, cartão e boleto.",
+  efi: "Cobrança Pix pelo PagBank (ou EFI).",
   settings: "Teste, suspensão e e-mail de aviso.",
   profile: "Seus dados de acesso."
 };
@@ -786,6 +787,8 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
               {!(board.testimonials || []).length ? <Empty title="Nenhum depoimento" text="Publique um autor e um texto para a seção aparecer na página inicial." /> : null}
             </article>
           ) : null}
+
+          {board && view === "efi" ? <AdminPagbank platform={board.platform} run={run} tell={tell} /> : null}
 
           {board && view === "efi" ? (
             <section className="sx-efi">

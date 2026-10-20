@@ -17,11 +17,15 @@ export type PlatformRow = {
   smtp_user: string;
   smtp_pass_enc: string;
   smtp_from: string;
+  payment_provider: string;
+  pagbank_token_enc: string;
+  pagbank_sandbox: boolean;
+  public_url: string;
 };
 
 export const loadPlatform = async () => {
   await q("INSERT INTO platform_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING");
-  const row = await one<PlatformRow>("SELECT efi_client_id, efi_client_secret_enc, efi_pix_key, efi_sandbox, efi_webhook_url, trial_days_default, warn_days, block_after_days, smtp_host, smtp_port, smtp_user, smtp_pass_enc, smtp_from FROM platform_settings WHERE id = 1");
+  const row = await one<PlatformRow>("SELECT efi_client_id, efi_client_secret_enc, efi_pix_key, efi_sandbox, efi_webhook_url, trial_days_default, warn_days, block_after_days, smtp_host, smtp_port, smtp_user, smtp_pass_enc, smtp_from, payment_provider, pagbank_token_enc, pagbank_sandbox, public_url FROM platform_settings WHERE id = 1");
   return row!;
 };
 
