@@ -587,7 +587,11 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
     if (!anyDue) {
       // Nenhuma loja venceu a cadência: o robô só está esperando. Gravar erro aqui fazia o painel
       // mostrar "Nenhuma oferta passou nos filtros" com cadência longa (ex.: 1 por hora).
-      await q("UPDATE settings SET last_run_at = now() WHERE company_id = $1", [company.id]);
+      // Se chegou aqui, há onde publicar: o aviso de "Ative um grupo" (ex.: conexão voltando de um reinício) já não vale.
+      await q(
+        "UPDATE settings SET last_run_at = now(), last_error = CASE WHEN last_error LIKE 'Ative um grupo%' THEN NULL ELSE last_error END WHERE company_id = $1",
+        [company.id]
+      );
       return;
     }
     if (!ranked.length) {
