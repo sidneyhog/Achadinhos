@@ -463,6 +463,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       perCycle: number;
       lastSent: Map<string, number>;
       posted: Map<string, number>;
+      badGroups: Set<string>;
       failed: boolean;
     }> = [];
     // Status: publicador próprio da conexão, com lojas, intervalo por loja, ofertas por vez e máximo por dia.
@@ -520,6 +521,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
         perCycle: Math.min(5, Math.max(1, Number(session.posts_per_cycle ?? current.posts_per_cycle) || 1)),
         lastSent: new Map(lastRows.map(row => [row.marketplace, new Date(row.last_at).getTime()])),
         posted: new Map(),
+        badGroups: new Set(),
         failed: false
       });
     }
@@ -655,7 +657,9 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
           if (last && Date.now() - last < cadenceSeconds(pub.cadence, marketplace) * 1000) continue;
           const matching = pub.groups.filter(group => textMatches(offer, group.categories));
           const destinations = (matching.length ? matching : pub.groups).slice(0, 40);
+          let delivered = false;
           for (const group of destinations) {
+            if (pub.badGroups.has(group.group_jid)) continue;
             const since = await q(
               `SELECT id FROM posts WHERE company_id = $1 AND group_jid = $2 AND status = 'sent' AND ${REPEAT_SQL} AND ((marketplace = $3 AND external_id = $4) OR url = $5 OR ${TITLE_KEY_SQL} = $6) LIMIT 1`,
               [company.id, group.group_jid, offer.marketplace, offer.externalId, published, titleKey(offer.title)]
@@ -671,19 +675,22 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
                 [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, group.group_jid, group.name, token, pub.id]
               );
               sent += 1;
-              pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
-              pub.lastSent.set(marketplace, Date.now());
+              delivered = true;
               await delay(pub.intervalMs);
             } catch (err) {
-              pub.failed = true;
+              // Um grupo que recusa (ex.: 403, número removido) sai só desta rodada; os outros continuam recebendo.
+              pub.badGroups.add(group.group_jid);
+              if (pub.groups.every(item => pub.badGroups.has(item.group_jid))) pub.failed = true;
               await q(
-                `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, group_jid, status, error, whatsapp_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'error',$8,$9)`,
-                [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, offer.url, group.group_jid, String((err as Error).message).slice(0, 400), pub.id]
+                `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, group_jid, group_name, status, error, whatsapp_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'error',$9,$10)`,
+                [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, offer.url, group.group_jid, group.name, String((err as Error).message).slice(0, 400), pub.id]
               );
-              await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, String((err as Error).message).slice(0, 400)]);
-              break;
+              await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, `Grupo ${group.name}: ${String((err as Error).message)}`.slice(0, 400)]);
             }
           }
+          // "Ofertas por vez" conta ofertas, não grupos. A cadência vale para o lote: lastSent fica com o
+          // horário do último envio antes desta rodada, então as próximas ofertas do lote não esperam a cadência.
+          if (delivered) pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
         }
         for (const pub of statusPubs) {
           if (pub.failed || pub.sentToday >= pub.perDay) continue;
@@ -718,7 +725,6 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             sent += 1;
             pub.sentToday += 1;
             pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
-            pub.lastSent.set(marketplace, Date.now());
             await delay(pub.intervalMs);
           } catch (err) {
             pub.failed = true;
