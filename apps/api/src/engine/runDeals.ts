@@ -16,6 +16,7 @@ import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
+import { URGENT_BONUS, varietyOrder } from "../deals/variety";
 import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
@@ -554,6 +555,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
     const botLast = new Map(botLastRows.map(row => [row.marketplace, new Date(row.last_at).getTime()]));
     const ranked: DealOffer[] = [];
     const errors: string[] = [];
+    let anyDue = false;
     for (const watch of campaigns) {
       const waDue = publishers.some(pub => {
         if (pub.stores.length && !pub.stores.includes(watch.marketplace)) return false;
@@ -571,6 +573,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
         return !last || Date.now() - last >= statusWait(pub.cadence, watch.marketplace) * 1000;
       });
       if (!waDue && !botDue && !statusDue) continue;
+      anyDue = true;
       try {
         const offers = await fetchOffers(watch.marketplace, watch.query, current, stores, ml);
         for (const offer of offers) {
@@ -580,6 +583,12 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       } catch (err) {
         errors.push(`${marketplaceLabel(watch.marketplace)}: ${(err as Error).message}`);
       }
+    }
+    if (!anyDue) {
+      // Nenhuma loja venceu a cadência: o robô só está esperando. Gravar erro aqui fazia o painel
+      // mostrar "Nenhuma oferta passou nos filtros" com cadência longa (ex.: 1 por hora).
+      await q("UPDATE settings SET last_run_at = now() WHERE company_id = $1", [company.id]);
+      return;
     }
     if (!ranked.length) {
       await q("UPDATE settings SET last_run_at = now(), last_error = $2 WHERE company_id = $1", [
@@ -609,7 +618,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       byStore.set(offer.marketplace, list);
     }
     for (const [marketplace, list] of byStore) {
-      const ordered = [...list].sort((a, b) => Number(offerEndsSoonText(b.title)) - Number(offerEndsSoonText(a.title)));
+      const ordered = varietyOrder(list, offer => (offer.score || 0) + (offerEndsSoonText(offer.title) ? URGENT_BONUS : 0));
       for (const offer of ordered) {
         let published = offer.url;
         if (offer.marketplace === "ml" && current.ml_official && current.ml_cookie_enc) {

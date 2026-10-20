@@ -342,3 +342,21 @@ test("Mercado Livre: uma leitura do catálogo serve todas as empresas", async (t
   await searchMercadoLivre("", tracking, "ssid=empresaC");
   assert.equal(pages, 4, "dentro de 3 minutos o catálogo guardado é reaproveitado");
 });
+
+test("variedade: sorteio ponderado favorece a melhor oferta sem repetir sempre a mesma ordem", async () => {
+  const { varietyOrder } = await import("../src/deals/variety");
+  const items = [{ id: "boa", score: 70 }, { id: "media", score: 20 }, { id: "fraca", score: 0 }];
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const firsts: Record<string, number> = { boa: 0, media: 0, fraca: 0 };
+  const orders = new Set<string>();
+  for (let round = 0; round < 2000; round += 1) {
+    const order = varietyOrder(items, item => item.score, rand);
+    assert.equal(order.length, 3, "não perde nem duplica oferta");
+    firsts[order[0].id] += 1;
+    orders.add(order.map(item => item.id).join(","));
+  }
+  assert.ok(firsts.boa > firsts.media && firsts.media > firsts.fraca, `a melhor sai primeiro mais vezes (${JSON.stringify(firsts)})`);
+  assert.ok(firsts.fraca > 0, "a mais fraca também tem chance de sair primeiro");
+  assert.ok(orders.size >= 4, "a ordem muda entre as rodadas");
+});

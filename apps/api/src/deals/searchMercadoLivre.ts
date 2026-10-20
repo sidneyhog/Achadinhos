@@ -1,6 +1,7 @@
 import axios from "axios";
 import { createHash } from "node:crypto";
-import { DealOffer } from "./types";
+import { DealOffer, scoreOffer } from "./types";
+import { varietyOrder } from "./variety";
 import { applyMlTracking, MlTracking } from "./mlAffiliate";
 
 const UA =
@@ -416,13 +417,9 @@ export const searchMercadoLivre = async (
     throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("verificação de conta") ? "O ML exige uma sessão logada para ler as ofertas." : "Pode ser bloqueio do ML ao IP da VPS."}`);
   }
   const wanted = offers.filter(offer => matchesQuery(offer, query));
-  const pool = (wanted.length ? wanted : offers).sort(
-    (a, b) =>
-      (b.discountPercent || 0) - (a.discountPercent || 0) ||
-      (b.soldQuantity || 0) - (a.soldQuantity || 0)
-  );
-  const withCoupon = pool.filter(offer => offer.couponLabel);
-  const ordered = [...withCoupon, ...pool.filter(offer => !offer.couponLabel)];
+  // Sorteio ponderado em vez de "maior desconto primeiro": o corte de 300 pegava sempre as mesmas
+  // ofertas do acervo (até 1200), e todas as empresas recebiam a mesma lista na mesma ordem.
+  const ordered = varietyOrder(wanted.length ? wanted : offers, scoreOffer);
   const seen = new Set<string>();
   const chosen: DealOffer[] = [];
   ordered.forEach(offer => {
