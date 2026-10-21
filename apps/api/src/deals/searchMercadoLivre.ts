@@ -184,30 +184,41 @@ const isVerificationWall = (parsed: any, html: string, finalUrl = ""): boolean =
   (!!parsed?.appProps?.pageProps?.authLinks && !parsed?.appProps?.pageProps?.data) ||
   (!parsed && /\/gz\/account-verification/i.test(html));
 
+/**
+ * Com o cookie salvo, o ML às vezes responde /ofertas com a página "Segurança — Mercado Livre" (21/10/2026):
+ * chaves title, scopes, flags, support, framework, mainEntry, wrapperProps, appProps e nenhum produto.
+ * Só sai dela quem abre o ML no navegador com a mesma conta e conclui a verificação.
+ */
+const isSecurityCheck = (parsed: any, html: string): boolean =>
+  !parsed?.appProps?.pageProps?.data &&
+  (/seguran[cç]a|security|captcha/i.test(String(parsed?.title || "")) ||
+    /<title[^>]*>[^<]*(seguran[cç]a|security)/i.test(html));
+
 /** Ofertas da página /ofertas do ML. `finalUrl` é o endereço depois dos redirecionamentos. Exportada para teste. */
 export const offersFromOffersPage = (
   html: string,
   finalUrl = ""
-): { offers: DealOffer[]; how: string; keys: string; blocked: boolean } => {
+): { offers: DealOffer[]; how: string; keys: string; blocked: boolean; security: boolean } => {
   let parsed: any = null;
   try {
     parsed = extractObject(html, "__NORDIC_RENDERING_CTX__");
   } catch {
     parsed = null;
   }
-  if (isVerificationWall(parsed, html, finalUrl)) return { offers: [], how: "", keys: "", blocked: true };
+  if (isVerificationWall(parsed, html, finalUrl)) return { offers: [], how: "", keys: "", blocked: true, security: false };
+  if (isSecurityCheck(parsed, html)) return { offers: [], how: "", keys: "", blocked: true, security: true };
   const direct = parsed?.appProps?.pageProps?.data?.items;
   if (Array.isArray(direct) && direct.length) {
     const offers = direct.map((item: any) => cardToOffer(item?.card)).filter((offer): offer is DealOffer => !!offer);
-    if (offers.length) return { offers, how: "lista padrão", keys: "", blocked: false };
+    if (offers.length) return { offers, how: "lista padrão", keys: "", blocked: false, security: false };
   }
   const deep = findCards(parsed).map(cardToOffer).filter((offer): offer is DealOffer => !!offer);
-  if (deep.length) return { offers: deep, how: "cartões encontrados na página", keys: "", blocked: false };
+  if (deep.length) return { offers: deep, how: "cartões encontrados na página", keys: "", blocked: false, security: false };
   const ld = fromJsonLd(html);
-  if (ld.length) return { offers: ld, how: "dados estruturados", keys: "", blocked: false };
+  if (ld.length) return { offers: ld, how: "dados estruturados", keys: "", blocked: false, security: false };
   const data = parsed?.appProps?.pageProps?.data;
   const keys = data && typeof data === "object" ? Object.keys(data).slice(0, 12).join(",") : parsed ? Object.keys(parsed).slice(0, 12).join(",") : "";
-  return { offers: [], how: "", keys, blocked: false };
+  return { offers: [], how: "", keys, blocked: false, security: false };
 };
 
 /**
@@ -312,7 +323,9 @@ const refreshCatalog = async (cookie: string, cookieKey: string): Promise<DealOf
       const finalUrl = String((response.request as any)?.res?.responseUrl || "");
       const result = offersFromOffersPage(html, finalUrl);
       if (page === 1) {
-        lastFetch.page = result.blocked
+        lastFetch.page = result.security
+          ? "o ML abriu a página de segurança para a sessão salva (verificação de segurança pendente)"
+          : result.blocked
           ? cookie
             ? "o ML redirecionou para a verificação de conta mesmo com o cookie salvo (sessão expirada ou recusada)"
             : "o ML redirecionou para a verificação de conta (login exigido; salve o cookie de sessão do Mercado Livre nas configurações)"
@@ -414,7 +427,7 @@ export const searchMercadoLivre = async (
   if (!offers.length) offers = await loadOfferCatalog(cookie);
   if (!offers.length) {
     // Sem isto o painel mostrava "Nenhuma oferta passou nos filtros", e o problema real (ML sem resposta útil) ficava escondido.
-    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("verificação de conta") ? "O ML exige uma sessão logada para ler as ofertas." : "Pode ser bloqueio do ML ao IP da VPS."}`);
+    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("página de segurança") ? "Abra o Mercado Livre no navegador com a conta do cookie, conclua a verificação de segurança e reenvie o cookie pela extensão." : lastFetch.page.includes("verificação de conta") ? "O ML exige uma sessão logada para ler as ofertas." : "Pode ser bloqueio do ML ao IP da VPS."}`);
   }
   const wanted = offers.filter(offer => matchesQuery(offer, query));
   // Sorteio ponderado em vez de "maior desconto primeiro": o corte de 300 pegava sempre as mesmas

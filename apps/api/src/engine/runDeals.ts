@@ -430,7 +430,16 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
         campaigns.push({ marketplace: id, query: "", min_discount: null, max_price_cents: null, priority: 0 });
       }
     }
-    if (!campaigns.length) return;
+    if (!campaigns.length) {
+      // Antes saía calado: com o "Mercado Livre aleatório" desligado e nenhuma campanha, o robô parava sem aviso no painel.
+      await q("UPDATE settings SET last_run_at = now(), last_error = $2 WHERE company_id = $1", [
+        company.id,
+        stores.has("ml")
+          ? "Nada para buscar: ligue o \"Mercado Livre aleatório\" ou cadastre uma campanha ativa"
+          : "Nada para buscar: ative uma loja ou cadastre uma campanha ativa"
+      ]);
+      return;
+    }
 
     const sessions = await q<{
       id: number;

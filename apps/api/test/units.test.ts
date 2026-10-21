@@ -164,6 +164,21 @@ test("Mercado Livre: lê o cartão real da página /ofertas logada e separa da p
   assert.equal(offersFromOffersPage("<html></html>", "https://www.mercadolivre.com.br/gz/account-verification?go=x").blocked, true, "redirecionou para /gz/account-verification");
 });
 
+test("Mercado Livre: reconhece a página de segurança que aparece mesmo com o cookie salvo", async () => {
+  const { offersFromOffersPage } = await import("../src/deals/searchMercadoLivre");
+  // Chaves de topo e título vistos na VPS em 21/10/2026 com o cookie da empresa.
+  const ctx = { title: "Segurança — Mercado Livre", scopes: {}, flags: {}, support: {}, framework: {}, mainEntry: "security", wrapperProps: {}, appProps: { pageProps: { deviceType: "desktop" } } };
+  const html = `<html><head><title>Segurança — Mercado Livre</title></head><body><script id="__NORDIC_RENDERING_CTX__">_n.ctx.r=${JSON.stringify(ctx)};</script></body></html>`;
+  const result = offersFromOffersPage(html, "https://www.mercadolivre.com.br/ofertas");
+  assert.equal(result.blocked, true);
+  assert.equal(result.security, true);
+  assert.equal(result.offers.length, 0);
+  const semTitulo = offersFromOffersPage(`<html><head><title>Segurança — Mercado Livre</title></head><body></body></html>`);
+  assert.equal(semTitulo.security, true, "sem o contexto, o título já basta");
+  const ofertas = offersFromOffersPage(html.replace(/Segurança — Mercado Livre/g, "Ofertas | Mercadolivre Brasil"));
+  assert.equal(ofertas.security, false, "página comum sem itens não é confundida com a de segurança");
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");
