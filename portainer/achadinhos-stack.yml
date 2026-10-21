@@ -17,7 +17,9 @@ x-api-env: &api-env
   ZAPO_AUTH_DIR: /data/zapo
   AUTO_SECRETS_FILE: /data/segredos/segredos.json
   ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
-  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+  # Sem valor padrão: só cria o super admin se ADMIN_PASSWORD (8+ caracteres) estiver definida no Portainer.
+  # Depois de criado, a senha muda pelo painel; esta variável não altera um admin que já existe.
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
   EFI_CLIENT_ID: ${EFI_CLIENT_ID:-}
   EFI_CLIENT_SECRET: ${EFI_CLIENT_SECRET:-}
   EFI_PIX_KEY: ${EFI_PIX_KEY:-}
