@@ -179,6 +179,14 @@ test("Mercado Livre: reconhece a página de segurança que aparece mesmo com o c
   assert.equal(ofertas.security, false, "página comum sem itens não é confundida com a de segurança");
 });
 
+test("grupo que recusa com 403 (número removido ou banido) é reconhecido para ser desativado", async () => {
+  const { removedFromGroup } = await import("../src/engine/runDeals");
+  // Mensagem real gravada em posts.error em 20-21/10/2026 nos três grupos que baniram o número.
+  assert.equal(removedFromGroup(new Error("group.metadata iq failed (403: forbidden)")), true);
+  assert.equal(removedFromGroup(new Error("Connection Closed")), false, "queda de conexão não desativa grupo");
+  assert.equal(removedFromGroup(new Error("timed out after 4030ms")), false);
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");

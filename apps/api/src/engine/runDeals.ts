@@ -66,6 +66,10 @@ type Campaign = {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/** Erro do WhatsApp que significa "o número não está mais neste grupo" (removido ou banido). Exportada para teste. */
+export const removedFromGroup = (err: unknown): boolean =>
+  /\b403\b|forbidden/i.test(String((err as Error)?.message ?? err ?? ""));
+
 const wordsOf = (raw: string) =>
   String(raw || "")
     .split(/[,;\n]/)
@@ -694,7 +698,14 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
                 `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, group_jid, group_name, status, error, whatsapp_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'error',$9,$10)`,
                 [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, offer.url, group.group_jid, group.name, String((err as Error).message).slice(0, 400), pub.id]
               );
-              await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, `Grupo ${group.name}: ${String((err as Error).message)}`.slice(0, 400)]);
+              if (removedFromGroup(err)) {
+                // 403 do WhatsApp: o número saiu ou foi banido do grupo. Insistir não adianta e enche o painel de erros.
+                await q("UPDATE groups SET enabled = false WHERE company_id = $1 AND group_jid = $2", [company.id, group.group_jid]);
+                await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, `Grupo ${group.name} desativado: o número não está mais nele (removido ou banido)`.slice(0, 400)]);
+                await audit(company.id, null, "group_disabled", `Grupo ${group.name} desativado: o WhatsApp recusou (403), o número não está mais no grupo`);
+              } else {
+                await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, `Grupo ${group.name}: ${String((err as Error).message)}`.slice(0, 400)]);
+              }
             }
           }
           // "Ofertas por vez" conta ofertas, não grupos. A cadência vale para o lote: lastSent fica com o
