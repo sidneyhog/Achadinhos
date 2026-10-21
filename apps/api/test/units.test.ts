@@ -187,6 +187,89 @@ test("grupo que recusa com 403 (número removido ou banido) é reconhecido para 
   assert.equal(removedFromGroup(new Error("timed out after 4030ms")), false);
 });
 
+test("Mercado Livre API oficial: preço e 'antes' saem do mesmo anúncio com desconto de verdade", async () => {
+  const { bestDiscountedItem } = await import("../src/deals/mlOfficial");
+  // Resposta real de /products/MLB54982411/items em 21/10/2026: o mais barato não tem preço antigo.
+  const results = [
+    { item_id: "MLB7076175320", price: 1349, original_price: null, currency_id: "BRL", shipping: { free_shipping: true } },
+    { item_id: "MLB7854529398", price: 1380, original_price: null, currency_id: "BRL", shipping: { free_shipping: true } },
+    { item_id: "MLB4217058289", price: 1392, original_price: 1699, currency_id: "BRL", shipping: { free_shipping: true } }
+  ];
+  assert.deepEqual(bestDiscountedItem(results), { itemId: "MLB4217058289", price: 1392, original: 1699, freeShipping: true });
+  assert.equal(bestDiscountedItem(results.slice(0, 2)), null, "sem preço antigo não há desconto para anunciar");
+  assert.equal(bestDiscountedItem([{ item_id: "MLB1", price: 100, original_price: 90, currency_id: "BRL" }]), null, "'antes' menor que o preço não conta");
+  assert.equal(bestDiscountedItem(undefined), null);
+});
+
+test("Mercado Livre API oficial: mais vendidos viram ofertas com nome, foto, link e desconto", async () => {
+  const { highlightProducts, offersForProducts } = await import("../src/deals/mlOfficial");
+  // Trechos reais de /highlights/MLB/category/MLB1055, /products/{id} e /products/{id}/items (21/10/2026).
+  const responses: Record<string, unknown> = {
+    "/highlights/MLB/category/MLB1055": {
+      query_data: { highlight_type: "BEST_SELLER", criteria: "CATEGORY", id: "MLB1055" },
+      content: [
+        { id: "MLB54982411", position: 1, type: "PRODUCT" },
+        { id: "MLBU4367700495", position: 2, type: "USER_PRODUCT" },
+        { id: "MLB55762063", position: 3, type: "PRODUCT" }
+      ]
+    },
+    "/products/MLB54982411/items?limit=20": {
+      paging: { total: 16, offset: 0, limit: 20 },
+      results: [
+        { item_id: "MLB7076175320", price: 1349, original_price: null, currency_id: "BRL", shipping: { free_shipping: true } },
+        { item_id: "MLB4217058289", price: 1392, original_price: 1699, currency_id: "BRL", shipping: { free_shipping: true } }
+      ]
+    },
+    "/products/MLB55762063/items?limit=20": { results: [{ item_id: "MLB999", price: 50, original_price: null, currency_id: "BRL" }] },
+    "/products/MLB54982411": {
+      id: "MLB54982411",
+      name: "Celular Samsung Galaxy A17 Com Ia, 256gb, 8gb Ram, Câm De 50mp, Tela De 6.7 , Nfc, Ip54 - Azul",
+      permalink: "",
+      pictures: [{ id: "889169-MLA96868779849_102025", url: "https://http2.mlstatic.com/D_NQ_NP_889169-MLA96868779849_102025-F.jpg" }]
+    }
+  };
+  const asked: string[] = [];
+  const get = async (path: string) => {
+    asked.push(path);
+    if (!(path in responses)) throw Object.assign(new Error("404"), { response: { status: 404 } });
+    return responses[path];
+  };
+  const products = await highlightProducts(get, { MLB1055: "Celulares e Telefones" });
+  assert.deepEqual(products.map(item => item.id), ["MLB54982411", "MLB55762063"], "produto de vendedor (MLBU) fica de fora");
+  const offers = await offersForProducts(get, products);
+  assert.equal(offers.length, 1, "produto sem desconto não vira oferta");
+  const [offer] = offers;
+  assert.equal(offer.externalId, "MLB4217058289");
+  assert.equal(offer.priceCents, 139200);
+  assert.equal(offer.originalPriceCents, 169900);
+  assert.equal(offer.discountPercent, 18);
+  assert.equal(offer.freeShipping, true);
+  assert.equal(offer.category, "Celulares e Telefones");
+  assert.equal(offer.url, "https://www.mercadolivre.com.br/p/MLB54982411?pdp_filters=item_id:MLB4217058289");
+  assert.equal(offer.imageUrl, "https://http2.mlstatic.com/D_NQ_NP_889169-MLA96868779849_102025-F.jpg");
+  assert.match(offer.title, /^Celular Samsung Galaxy A17/);
+  assert.equal(asked.includes("/products/MLB55762063"), false, "sem desconto, não gasta chamada buscando nome e foto");
+});
+
+test("Mercado Livre API oficial: fica desligada sem as duas variáveis da stack", async () => {
+  const { mlOfficialConfigured } = await import("../src/deals/mlOfficial");
+  const saved = { id: process.env.ML_CLIENT_ID, secret: process.env.ML_CLIENT_SECRET };
+  try {
+    delete process.env.ML_CLIENT_ID;
+    delete process.env.ML_CLIENT_SECRET;
+    assert.equal(mlOfficialConfigured(), false);
+    process.env.ML_CLIENT_ID = "505076077288559";
+    assert.equal(mlOfficialConfigured(), false, "só o ID não basta");
+    process.env.ML_CLIENT_SECRET = "   ";
+    assert.equal(mlOfficialConfigured(), false, "chave em branco não conta");
+    process.env.ML_CLIENT_SECRET = "x";
+    assert.equal(mlOfficialConfigured(), true);
+  } finally {
+    if (saved.id === undefined) delete process.env.ML_CLIENT_ID; else process.env.ML_CLIENT_ID = saved.id;
+    if (saved.secret === undefined) delete process.env.ML_CLIENT_SECRET; else process.env.ML_CLIENT_SECRET = saved.secret;
+  }
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");

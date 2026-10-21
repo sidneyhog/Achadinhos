@@ -24,6 +24,9 @@ x-api-env: &api-env
   EFI_CERT_PATH: ${EFI_CERT_PATH:-}
   EFI_CERT_PASSWORD: ${EFI_CERT_PASSWORD:-}
   EFI_SANDBOX: ${EFI_SANDBOX:-true}
+  # App do Mercado Livre (developers.mercadolivre.com.br): sem os dois, o robô volta para a página /ofertas.
+  ML_CLIENT_ID: ${ML_CLIENT_ID:-}
+  ML_CLIENT_SECRET: ${ML_CLIENT_SECRET:-}
   TZ: America/Sao_Paulo
 
 x-placement: &so-manager

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { DealOffer, scoreOffer } from "./types";
 import { varietyOrder } from "./variety";
 import { applyMlTracking, MlTracking } from "./mlAffiliate";
+import { mlOfficialConfigured, officialMlOffers } from "./mlOfficial";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -275,7 +276,7 @@ export const mergeIntoPool = (
 };
 
 /** O que o ML respondeu na última tentativa; vai para a mensagem de erro do painel quando não vem nenhuma oferta. */
-const lastFetch = { api: "", page: "" };
+const lastFetch = { official: "", api: "", page: "" };
 
 /** Cabeçalhos do /ofertas. Com o cookie de sessão salvo pela empresa, o ML não manda para a verificação de conta. Exportada para teste. */
 export const offersPageHeaders = (cookie?: string): Record<string, string> => {
@@ -413,7 +414,21 @@ export const searchMercadoLivre = async (
   cookie = ""
 ): Promise<DealOffer[]> => {
   let offers: DealOffer[] = [];
-  if (Date.now() >= apiPausedUntil) {
+  // API oficial com o token do app: não depende de cookie nem da página /ofertas, que o ML passou a barrar.
+  const official = mlOfficialConfigured();
+  if (official) {
+    try {
+      offers = await officialMlOffers(query);
+      // Palavra-chave sem produto com desconto: os mais vendidos com desconto entram no lugar.
+      if (!offers.length && query.trim()) offers = await officialMlOffers("");
+      lastFetch.official = `${offers.length} ofertas com desconto`;
+    } catch (err) {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      lastFetch.official = status ? `HTTP ${status}` : String((err as Error).message || err).slice(0, 80);
+      offers = [];
+    }
+  }
+  if (!offers.length && Date.now() >= apiPausedUntil) {
     try {
       offers = await fromApi(query);
       lastFetch.api = `${offers.length} resultados`;
@@ -427,7 +442,11 @@ export const searchMercadoLivre = async (
   if (!offers.length) offers = await loadOfferCatalog(cookie);
   if (!offers.length) {
     // Sem isto o painel mostrava "Nenhuma oferta passou nos filtros", e o problema real (ML sem resposta útil) ficava escondido.
-    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${lastFetch.page.includes("página de segurança") ? "Abra o Mercado Livre no navegador com a conta do cookie, conclua a verificação de segurança e reenvie o cookie pela extensão." : lastFetch.page.includes("verificação de conta") ? "O ML exige uma sessão logada para ler as ofertas." : "Pode ser bloqueio do ML ao IP da VPS."}`);
+    const officialPart = official ? `API oficial: ${lastFetch.official || "sem resposta"}; ` : "";
+    const hint = official
+      ? "A API oficial não trouxe ofertas com desconto agora; o robô tenta de novo na próxima rodada."
+      : "Configure ML_CLIENT_ID e ML_CLIENT_SECRET na stack para usar a API oficial do Mercado Livre.";
+    throw new Error(`o Mercado Livre não devolveu ofertas para este servidor (${officialPart}busca: ${lastFetch.api || "sem resposta"}; página de ofertas: ${lastFetch.page || "sem resposta"}). ${hint}`);
   }
   const wanted = offers.filter(offer => matchesQuery(offer, query));
   // Sorteio ponderado em vez de "maior desconto primeiro": o corte de 300 pegava sempre as mesmas
