@@ -246,7 +246,7 @@ test("Mercado Livre API oficial: mais vendidos viram ofertas com nome, foto, lin
   assert.equal(offer.freeShipping, true);
   assert.equal(offer.category, "Celulares e Telefones");
   assert.equal(offer.url, "https://www.mercadolivre.com.br/p/MLB54982411?pdp_filters=item_id:MLB4217058289");
-  assert.equal(offer.imageUrl, "https://http2.mlstatic.com/D_NQ_NP_889169-MLA96868779849_102025-F.jpg");
+  assert.equal(offer.imageUrl, "https://http2.mlstatic.com/D_NQ_NP_889169-MLA96868779849_102025-O.webp", "foto média, a que cabe no cartão de prévia");
   assert.match(offer.title, /^Celular Samsung Galaxy A17/);
   assert.equal(asked.includes("/products/MLB55762063"), false, "sem desconto, não gasta chamada buscando nome e foto");
 });

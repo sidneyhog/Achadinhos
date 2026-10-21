@@ -48,7 +48,18 @@ export const ML_HIGHLIGHT_CATEGORIES: Record<string, string> = {
 
 export type MlGet = (path: string) => Promise<any>;
 
-type ProductRef = { id: string; name?: string; pictures?: Array<{ url?: string; secure_url?: string }>; category?: string };
+type ProductRef = { id: string; name?: string; pictures?: Array<{ id?: string; url?: string; secure_url?: string }>; category?: string };
+
+/**
+ * A API devolve a foto grande ("-F.jpg", ~160 KB) e o cartão de prévia do WhatsApp saiu sem imagem com ela.
+ * A versão "-O" (~50 KB) é a mesma que a página /ofertas usava e que aparecia no cartão. Exportada para teste.
+ */
+export const mlPictureUrl = (picture: { id?: string; url?: string; secure_url?: string } | undefined): string | undefined => {
+  const id = String(picture?.id || "");
+  if (/^\d+-[A-Z]{3}\d+_\d+$/.test(id)) return `https://http2.mlstatic.com/D_NQ_NP_${id}-O.webp`;
+  const url = String(picture?.secure_url || picture?.url || "");
+  return /^https:\/\//.test(url) ? url : undefined;
+};
 
 type BestItem = { itemId: string; price: number; original: number; freeShipping: boolean };
 
@@ -81,7 +92,7 @@ export const productOffer = (product: ProductRef, best: BestItem): DealOffer | n
   if (!title || !/^MLB\d+$/.test(product.id)) return null;
   const priceCents = Math.round(best.price * 100);
   const originalPriceCents = Math.round(best.original * 100);
-  const picture = (product.pictures || []).map(item => String(item?.secure_url || item?.url || "")).find(url => /^https:\/\//.test(url));
+  const picture = (product.pictures || []).map(mlPictureUrl).find(Boolean);
   return {
     externalId: best.itemId,
     title,
