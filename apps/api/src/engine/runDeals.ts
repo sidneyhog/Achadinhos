@@ -6,7 +6,7 @@ import { decrypt } from "../secrets";
 import { getLive, sendStatus, sendTextWithPreview, type LinkPreview } from "../zapo/session";
 import { groupCaption, isJpeg, jpegCandidates, previewText, statusCaption } from "../deals/messages";
 import { searchMercadoLivre, offerEndsSoonText } from "../deals/searchMercadoLivre";
-import { searchAmazon } from "../deals/searchAmazon";
+import { AMAZON_QUEUE_MAX, amazonQueueOffer } from "../deals/amazonExtension";
 import { amazonOffersFromLinks } from "../deals/amazonLinks";
 import { searchShopee } from "../deals/searchShopee";
 import { searchAliExpress } from "../deals/searchAliExpress";
@@ -272,29 +272,23 @@ const fetchOffers = async (
     return searchMercadoLivre(query, ml, decrypt(setting.ml_cookie_enc || ""));
   }
   if (marketplace === "amazon") {
-    const links = amazonOffersFromLinks(secret.links || pub.links || "", pub.partnerTag || secret.partnerTag || "");
-    if (secret.partnerTag && secret.accessKey && secret.secretKey) {
-      try {
-        const found = await searchAmazon({
-          query,
-          partnerTag: secret.partnerTag,
-          accessKey: secret.accessKey,
-          secretKey: secret.secretKey
-        });
-        return [...found, ...links];
-      } catch (err) {
-        if (links.length) return links;
-        throw err;
-      }
+    // A PA-API 5 foi desligada pela Amazon em 2026 (responde 403); a busca automática agora é a Creators API,
+    // liberada só com 10 vendas em 30 dias. Até lá: produtos do botão da extensão e links colados.
+    const tag = String(pub.partnerTag || secret.partnerTag || "").trim();
+    if (!tag) throw new Error("falta a Partner Tag (termina em -20) em Lojas → Amazon");
+    const queued = await q<{ external_id: string; title: string; price_cents: number; original_price_cents: number | null; image_url: string | null }>(
+      `SELECT external_id, title, price_cents, original_price_cents, image_url FROM extension_offers
+       WHERE company_id = $1 AND marketplace = 'amazon' AND expires_at > now() ORDER BY created_at DESC LIMIT $2`,
+      [setting.company_id, AMAZON_QUEUE_MAX]
+    );
+    const fromExtension = queued.map(row => amazonQueueOffer(row, tag));
+    const seen = new Set(fromExtension.map(offer => offer.externalId));
+    const links = amazonOffersFromLinks(secret.links || pub.links || "", tag).filter(offer => !seen.has(offer.externalId));
+    // Sem isto o painel dizia "Nenhuma oferta passou nos filtros", e o motivo real (nada na fila) ficava escondido.
+    if (!fromExtension.length && !links.length) {
+      throw new Error("nenhum produto na fila: use o botão \"Enviar ao Achadinhos\" da extensão na página do produto da Amazon, ou cole links em Lojas → Amazon");
     }
-    // Sem isto o painel dizia "Nenhuma oferta passou nos filtros", e o motivo real (nada colado) ficava escondido.
-    if (!links.length) {
-      const tag = pub.partnerTag || secret.partnerTag;
-      throw new Error(tag
-        ? "nenhum link de produto colado em Lojas → Amazon (sem a Creators API, o robô só publica os links colados)"
-        : "falta a Partner Tag (termina em -20) em Lojas → Amazon");
-    }
-    return links;
+    return [...fromExtension, ...links];
   }
   if (marketplace === "shopee") {
     // O painel salva o App ID em public_config e só o Secret nos segredos.

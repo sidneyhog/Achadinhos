@@ -34,6 +34,24 @@ const lerCodigo = (codigo) => {
   }
 };
 
+/** Produto da Amazon escolhido pelo botão da página: vai para a fila da empresa no painel. */
+const enviarAmazon = async (produto) => {
+  const { codigo } = await chrome.storage.local.get("codigo");
+  const destino = lerCodigo(codigo);
+  if (!destino) return { ok: false, erro: "Cole o código do painel na extensão primeiro" };
+  try {
+    const resposta = await fetch(`${destino.painel}/api/extension/amazon-item`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Achadinhos-Key": destino.chave },
+      body: JSON.stringify(produto)
+    });
+    const dados = await resposta.json().catch(() => ({}));
+    return resposta.ok ? { ok: true, fila: Number(dados.queued) || 1 } : { ok: false, erro: dados.error || `O painel respondeu ${resposta.status}` };
+  } catch (err) {
+    return { ok: false, erro: "Não consegui falar com o painel" };
+  }
+};
+
 /** Manda o cookie atual ao painel e guarda o resultado para o popup mostrar. */
 const enviarCookie = async () => {
   const { codigo } = await chrome.storage.local.get("codigo");

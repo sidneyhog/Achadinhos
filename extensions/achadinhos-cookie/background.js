@@ -17,7 +17,13 @@ chrome.cookies.onChanged.addListener(({ cookie, removed }) => {
 });
 
 chrome.runtime.onMessage.addListener((pedido, _remetente, responder) => {
-  if (pedido?.tipo !== "enviar") return false;
-  enviarCookie().then(responder);
-  return true;
+  if (pedido?.tipo === "enviar") {
+    enviarCookie().then(responder);
+    return true;
+  }
+  if (pedido?.tipo === "amazon") {
+    enviarAmazon(pedido.produto).then(responder);
+    return true;
+  }
+  return false;
 });

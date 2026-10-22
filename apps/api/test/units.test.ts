@@ -302,6 +302,36 @@ test("loja habilitada entra nas conexões que têm lista de lojas, com intervalo
   assert.equal(cadenceWithStore({ ml: 300, amazon: 900 }, "amazon"), null, "intervalo que a empresa já escolheu não muda");
 });
 
+test("Amazon pela extensão: valida o produto enviado e monta a oferta com a tag da empresa", async () => {
+  const { readAmazonItem, amazonQueueOffer } = await import("../src/deals/amazonExtension");
+  const ok = readAmazonItem({
+    asin: "b09wxvh7wk",
+    title: "  Echo Pop | Smart speaker   compacto ",
+    priceCents: 29900,
+    originalPriceCents: 39900,
+    imageUrl: "https://m.media-amazon.com/images/I/61u48FEs0rL._AC_SL1000_.jpg"
+  });
+  assert.deepEqual(ok, {
+    asin: "B09WXVH7WK",
+    title: "Echo Pop | Smart speaker compacto",
+    priceCents: 29900,
+    originalPriceCents: 39900,
+    imageUrl: "https://m.media-amazon.com/images/I/61u48FEs0rL._AC_SL1000_.jpg"
+  });
+  assert.equal(readAmazonItem({ ...ok, asin: "123" }), null, "ASIN inválido");
+  assert.equal(readAmazonItem({ ...ok, priceCents: 0 }), null, "sem preço não publica");
+  assert.equal(readAmazonItem({ ...ok, imageUrl: "https://exemplo.com/x.jpg" })?.imageUrl, null, "foto só do CDN da Amazon");
+  assert.equal(readAmazonItem({ ...ok, originalPriceCents: 100 })?.originalPriceCents, null, "'antes' menor que o preço não conta");
+
+  const offer = amazonQueueOffer({ external_id: "B09WXVH7WK", title: "Echo Pop", price_cents: 29900, original_price_cents: 39900, image_url: null }, "sidneyhog-20");
+  assert.equal(offer.url, "https://www.amazon.com.br/dp/B09WXVH7WK?tag=sidneyhog-20");
+  assert.equal(offer.discountPercent, 25);
+  assert.equal(offer.marketplace, "amazon");
+  const outra = amazonQueueOffer({ external_id: "B09WXVH7WK", title: "Echo Pop", price_cents: 29900, original_price_cents: null, image_url: null }, "joao-20");
+  assert.equal(outra.url, "https://www.amazon.com.br/dp/B09WXVH7WK?tag=joao-20", "cada empresa com a própria tag");
+  assert.equal(outra.discountPercent, undefined);
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");

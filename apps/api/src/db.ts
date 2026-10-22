@@ -182,6 +182,20 @@ export const migrate = async () => {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- Produtos que a empresa mandou pelo botão da extensão (Amazon). Valem até expires_at: preço da Amazon muda no dia.
+    CREATE TABLE IF NOT EXISTS extension_offers (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      marketplace TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      price_cents INTEGER NOT NULL,
+      original_price_cents INTEGER,
+      image_url TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (company_id, marketplace, external_id)
+    );
   `);
   const email = (process.env.ADMIN_EMAIL || "admin@achadinhos.local").trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD || "";

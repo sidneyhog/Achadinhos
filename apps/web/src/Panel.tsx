@@ -243,8 +243,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     portal: ["Abrir o Amazon Associados", "https://associados.amazon.com.br"],
     steps: [
       "No Amazon Associados, copie a sua Partner Tag (termina em -20). Também pode colar um link seu com tag=.",
-      "Em Links dos produtos, cole um produto por linha: link | nome | preço. Vale o link da página (amazon.com.br/dp/...) ou o link curto da barra SiteStripe (amzn.to/...). O robô põe a sua tag e publica um por vez.",
-      "A busca automática depende da Creators API da Amazon, que só é liberada para contas com vendas recentes. Até lá, use os links colados."
+      "Jeito rápido: instale a extensão do Achadinhos (página Automação), cole o código do painel nela e, na página de qualquer produto da Amazon, clique em Enviar ao Achadinhos. Nome, preço, preço antigo e foto vão juntos, e o produto fica 24 h na fila.",
+      "Também dá para colar em Links dos produtos, um por linha: link | nome | preço (link da página ou o curto amzn.to da SiteStripe).",
+      "A busca automática depende da Creators API da Amazon, liberada com 10 vendas em 30 dias. Até lá, use o botão da extensão."
     ]
   },
   awin: {
@@ -2312,9 +2313,9 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
 
           {view === "auto" && (
             <section className="aff-block aff-guidepage">
-              <header className="aff-guidepage__head"><div><h2>Automação</h2><p>Baixe a extensão, instale no Chrome ou no Edge e copie o cookie da loja.</p></div><a className="is-solid" href="/achadinhos-cookie.zip" download>Baixar extensão</a></header>
+              <header className="aff-guidepage__head"><div><h2>Automação</h2><p>Baixe a extensão, instale no Chrome ou no Edge, copie o cookie do Mercado Livre e use o botão Enviar ao Achadinhos nos produtos da Amazon.</p></div><a className="is-solid" href="/achadinhos-cookie.zip" download>Baixar extensão</a></header>
               <div className="aff-guidepage__grid">
-                {[["Baixar", "Clique em Baixar extensão e descompacte o arquivo. Sai a pasta achadinhos-cookie."], ["Chrome ou Edge", "Abra chrome://extensions (ou edge://extensions), ligue o Modo do desenvolvedor, clique em Carregar sem compactação e escolha a pasta."], ["Copiar cookie", "Entre na sua conta do Mercado Livre, clique no ícone da extensão e em Copiar cookie."], ["Salvar", "Em Lojas → Mercado Livre, cole no campo Cookie do gerador e salve. Vale por cerca de 30 dias."]].map(([title, text], index) => (
+                {[["Baixar", "Clique em Baixar extensão e descompacte o arquivo. Sai a pasta achadinhos-cookie."], ["Chrome ou Edge", "Abra chrome://extensions (ou edge://extensions), ligue o Modo do desenvolvedor, clique em Carregar sem compactação e escolha a pasta."], ["Copiar cookie", "Entre na sua conta do Mercado Livre, clique no ícone da extensão e em Copiar cookie."], ["Salvar", "Em Lojas → Mercado Livre, cole no campo Cookie do gerador e salve. Vale por cerca de 30 dias."], ["Amazon", "Cole o código do painel na extensão. Na página de um produto da Amazon aparece o botão Enviar ao Achadinhos: um clique e o produto entra na fila por 24 h, com a sua tag."]].map(([title, text], index) => (
                   <article key={title}><b>{index + 1}</b><div><strong>{title}</strong><span>{text}</span></div></article>
                 ))}
               </div>
