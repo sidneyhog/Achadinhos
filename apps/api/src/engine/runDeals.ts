@@ -287,6 +287,13 @@ const fetchOffers = async (
         throw err;
       }
     }
+    // Sem isto o painel dizia "Nenhuma oferta passou nos filtros", e o motivo real (nada colado) ficava escondido.
+    if (!links.length) {
+      const tag = pub.partnerTag || secret.partnerTag;
+      throw new Error(tag
+        ? "nenhum link de produto colado em Lojas → Amazon (sem a Creators API, o robô só publica os links colados)"
+        : "falta a Partner Tag (termina em -20) em Lojas → Amazon");
+    }
     return links;
   }
   if (marketplace === "shopee") {
