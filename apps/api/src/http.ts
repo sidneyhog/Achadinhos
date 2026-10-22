@@ -19,7 +19,7 @@ import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace } from "./deals/statusPolicy";
 import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
-import { AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, readAmazonItem } from "./deals/amazonExtension";
+import { AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, amazonQueueOffer, readAmazonItem } from "./deals/amazonExtension";
 import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
 
 export type AuthUser = {
@@ -1202,14 +1202,47 @@ app.get("/api/offers", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const marketplace = String(req.query.marketplace || "");
     const search = String(req.query.search || "").trim();
-    const rows = await q(
-      `SELECT * FROM offers WHERE company_id = $1
-       AND ($2 = '' OR marketplace = $2)
-       AND ($3 = '' OR title ILIKE '%' || $3 || '%')
-       ORDER BY score DESC, found_at DESC LIMIT 80`,
+    // Até 80 por loja: com um teto único de 80, as centenas de ofertas do ML ocupavam tudo e a tela de cada
+    // outra loja (ex.: Amazon) aparecia vazia mesmo com oferta publicada.
+    const rows = await q<Record<string, unknown>>(
+      `SELECT * FROM (
+         SELECT o.*, row_number() OVER (PARTITION BY marketplace ORDER BY score DESC, found_at DESC) AS store_rank
+         FROM offers o WHERE company_id = $1
+           AND ($2 = '' OR marketplace = $2)
+           AND ($3 = '' OR title ILIKE '%' || $3 || '%')
+       ) ranked WHERE store_rank <= 80 ORDER BY score DESC, found_at DESC LIMIT 1200`,
       [companyId, marketplace, search]
     );
-    res.json({ offers: rows });
+    // Produtos mandados pelo botão da extensão aparecem na tela da Amazon assim que chegam, antes de o robô ler a fila.
+    const queued = marketplace && marketplace !== "amazon" ? [] : await q<{
+      id: number; external_id: string; title: string; price_cents: number; original_price_cents: number | null; image_url: string | null; created_at: string; tag: string | null;
+    }>(
+      `SELECT e.id, e.external_id, e.title, e.price_cents, e.original_price_cents, e.image_url, e.created_at, s.public_config->>'partnerTag' AS tag
+       FROM extension_offers e
+       LEFT JOIN stores s ON s.company_id = e.company_id AND s.marketplace = 'amazon'
+       WHERE e.company_id = $1 AND e.marketplace = 'amazon' AND e.expires_at > now()
+         AND ($2 = '' OR e.title ILIKE '%' || $2 || '%')
+         AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.company_id = e.company_id AND o.marketplace = 'amazon' AND o.external_id = e.external_id)
+       ORDER BY e.created_at DESC`,
+      [companyId, search]
+    );
+    const fromQueue = queued.map(row => ({
+      ...amazonQueueOffer(row, String(row.tag || "")),
+      id: -row.id,
+      company_id: companyId,
+      marketplace: "amazon",
+      external_id: row.external_id,
+      price_cents: row.price_cents,
+      original_price_cents: row.original_price_cents,
+      discount_percent: row.original_price_cents && row.original_price_cents > row.price_cents
+        ? Math.round(((row.original_price_cents - row.price_cents) / row.original_price_cents) * 100)
+        : null,
+      image_url: row.image_url,
+      category: "na fila",
+      score: 0,
+      found_at: row.created_at
+    }));
+    res.json({ offers: [...fromQueue, ...rows] });
   } catch (err) {
     next(err);
   }

@@ -1505,7 +1505,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                         <strong>{item.title}</strong>
                         <p className="aff-price">{item.original_price_cents ? <s>{money(item.original_price_cents)}</s> : null}<b>{money(item.price_cents)}</b></p>
                         <div className="aff-score"><span>Score {item.score || 0}</span><i><b style={{ width: `${Math.min(100, Number(item.score || 0))}%` }} /></i></div>
-                        <div className="aff-badges"><em>Oferta quente</em></div>
+                        <div className="aff-badges"><em>{item.category === "na fila" ? "Na fila" : "Oferta quente"}</em></div>
                         <footer><span>{STORES.find((store) => store.id === item.marketplace)?.label}</span><a href={item.url} target="_blank" rel="noreferrer">Link</a></footer>
                       </div>
                     </article>
