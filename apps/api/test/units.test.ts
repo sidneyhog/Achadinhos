@@ -270,6 +270,26 @@ test("Mercado Livre API oficial: fica desligada sem as duas variáveis da stack"
   }
 });
 
+test("Amazon: links colados levam a tag da empresa, e o link curto da SiteStripe também entra", async () => {
+  const { amazonOffersFromLinks } = await import("../src/deals/amazonLinks");
+  const raw = [
+    "https://www.amazon.com.br/Echo-Pop/dp/B09WXVH7WK/ref=sr_1_1?tag=outra-20 | Echo Pop | 299,00",
+    "https://amzn.to/3XyZ9ab | Fone JBL | 189,90",
+    "https://amzn.to/3XyZ9ab | repetido | 1",
+    "https://www.amazon.com.br/dp/B09WXVH7WK | repetido pelo ASIN | 1",
+    "https://amzn.to/ab | curto demais",
+    "https://exemplo.com/amazon.html | não é Amazon"
+  ].join("\n");
+  const offers = amazonOffersFromLinks(raw, "sidneyhog-20");
+  assert.equal(offers.length, 2);
+  assert.equal(offers[0].url, "https://www.amazon.com.br/dp/B09WXVH7WK?tag=sidneyhog-20", "a tag colada no link é trocada pela da empresa");
+  assert.equal(offers[0].priceCents, 29900);
+  assert.equal(offers[1].url, "https://amzn.to/3XyZ9ab", "link curto segue como veio (já tem a tag de quem gerou)");
+  assert.equal(offers[1].externalId, "amzn.to/3XyZ9ab");
+  assert.equal(offers[1].title, "Fone JBL");
+  assert.deepEqual(amazonOffersFromLinks(raw, ""), [], "sem tag não publica nada");
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");

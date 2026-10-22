@@ -243,8 +243,8 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     portal: ["Abrir o Amazon Associados", "https://associados.amazon.com.br"],
     steps: [
       "No Amazon Associados, copie a sua Partner Tag (termina em -20). Também pode colar um link seu com tag=.",
-      "Em Links dos produtos, cole um produto por linha: link | nome | preço. O robô põe a sua tag e publica um por vez.",
-      "Access Key e Secret são opcionais: a Amazon só libera a API depois de 10 vendas em 30 dias."
+      "Em Links dos produtos, cole um produto por linha: link | nome | preço. Vale o link da página (amazon.com.br/dp/...) ou o link curto da barra SiteStripe (amzn.to/...). O robô põe a sua tag e publica um por vez.",
+      "A busca automática depende da Creators API da Amazon, que só é liberada para contas com vendas recentes. Até lá, use os links colados."
     ]
   },
   awin: {

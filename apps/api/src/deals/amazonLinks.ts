@@ -7,6 +7,12 @@ const asinOf = (value: string): string => {
   return match ? match[1].toUpperCase() : "";
 };
 
+/** Link curto da barra SiteStripe (amzn.to/xxxx): já sai da Amazon com a tag de quem gerou. */
+const shortLinkOf = (value: string): string => {
+  const match = String(value || "").match(/^https?:\/\/amzn\.to\/([A-Za-z0-9]{4,20})\/?$/i);
+  return match ? `https://amzn.to/${match[1]}` : "";
+};
+
 /** Links que o cliente colou. A tag da conta entra no endereço. Não consulta a Amazon. */
 export const amazonOffersFromLinks = (raw: unknown, partnerTag: string): DealOffer[] => {
   const tag = String(partnerTag || "").trim();
@@ -15,19 +21,21 @@ export const amazonOffersFromLinks = (raw: unknown, partnerTag: string): DealOff
   const offers: DealOffer[] = [];
   String(raw || "").split(/\n+/).forEach(line => {
     const parts = line.split("|").map(part => part.trim()).filter(Boolean);
-    const urlPart = parts.find(part => /amazon\./i.test(part)) || "";
+    const urlPart = parts.find(part => /amazon\.|amzn\.to\//i.test(part)) || "";
     if (!urlPart) return;
     const asin = asinOf(urlPart);
-    if (!asin || seen.has(asin)) return;
-    seen.add(asin);
+    const short = asin ? "" : shortLinkOf(urlPart);
+    const key = asin || short;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
     const title = parts.find(part => part !== urlPart && !/^https?:/i.test(part) && !/^\d+([.,]\d{1,2})?$/.test(part)) || "";
     const priceRaw = parts.find(part => /^\d+([.,]\d{1,2})?$/.test(part));
     const priceCents = priceRaw ? Math.round(Number(priceRaw.replace(",", ".")) * 100) : 0;
     offers.push({
-      externalId: asin,
+      externalId: asin || short.replace("https://", ""),
       title: title.slice(0, 180) || "Oferta na Amazon",
       priceCents: Number.isFinite(priceCents) ? priceCents : 0,
-      url: `https://www.amazon.com.br/dp/${asin}?tag=${encodeURIComponent(tag)}`,
+      url: asin ? `https://www.amazon.com.br/dp/${asin}?tag=${encodeURIComponent(tag)}` : short,
       marketplace: "amazon",
       category: "link"
     });
