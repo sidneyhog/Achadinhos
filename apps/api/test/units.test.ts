@@ -290,6 +290,18 @@ test("Amazon: links colados levam a tag da empresa, e o link curto da SiteStripe
   assert.deepEqual(amazonOffersFromLinks(raw, ""), [], "sem tag não publica nada");
 });
 
+test("loja habilitada entra nas conexões que têm lista de lojas, com intervalo seguro", async () => {
+  const { listWithStore, cadenceWithStore, NEW_STORE_DEFAULT_SECONDS } = await import("../src/deals/storeRollout");
+  // Situação real de 22/10/2026: conexão "achei" salva só com ML, ML a cada 6 h; Amazon habilitada depois.
+  assert.deepEqual(listWithStore(["ml"], "amazon"), ["ml", "amazon"]);
+  assert.equal(listWithStore([], "amazon"), null, "lista vazia já publica todas as lojas");
+  assert.equal(listWithStore(["ml", "amazon"], "amazon"), null, "já está na lista");
+  assert.deepEqual(listWithStore('["ml"]', "shopee"), ["ml", "shopee"], "aceita a lista como texto JSON");
+  assert.deepEqual(cadenceWithStore({ ml: 21600 }, "amazon"), { ml: 21600, amazon: 21600 }, "herda o intervalo mais longo da conexão");
+  assert.deepEqual(cadenceWithStore({}, "natura"), { natura: NEW_STORE_DEFAULT_SECONDS }, "sem intervalo nenhum: 1 por hora, não o padrão de 2 min");
+  assert.equal(cadenceWithStore({ ml: 300, amazon: 900 }, "amazon"), null, "intervalo que a empresa já escolheu não muda");
+});
+
 test("Mercado Livre: /ofertas leva o cookie de sessão salvo pela empresa", async () => {
   const { offersPageHeaders } = await import("../src/deals/searchMercadoLivre");
   assert.equal(offersPageHeaders(" ssid=abc; nsa_rotok=x.y.z ").Cookie, "ssid=abc; nsa_rotok=x.y.z");

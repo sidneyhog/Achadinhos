@@ -18,6 +18,7 @@ import { marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace } from "./deals/statusPolicy";
+import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
 import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
 
 export type AuthUser = {
@@ -1059,6 +1060,43 @@ app.post("/api/stores/ml/test", auth, async (req, res, next) => {
   }
 });
 
+/**
+ * Loja salva como habilitada entra em todas as conexões (grupos e Status) e bots da empresa que têm lista de lojas,
+ * com intervalo inicial igual ao mais longo da conexão. Antes, a conexão salva só com "ML" ignorava a loja nova.
+ */
+const rollOutStore = async (companyId: number, marketplace: string) => {
+  const sessions = await q<{ id: number; stores: unknown; status_stores: unknown; send_cadence: unknown; status_cadence: unknown }>(
+    "SELECT id, stores, status_stores, send_cadence, status_cadence FROM whatsapp_sessions WHERE company_id = $1",
+    [companyId]
+  );
+  for (const session of sessions) {
+    const stores = listWithStore(session.stores, marketplace);
+    const statusStores = listWithStore(session.status_stores, marketplace);
+    const cadence = cadenceWithStore(session.send_cadence, marketplace);
+    const statusCadence = cadenceWithStore(session.status_cadence, marketplace);
+    if (!stores && !statusStores && !cadence && !statusCadence) continue;
+    await q(
+      `UPDATE whatsapp_sessions SET
+         stores = COALESCE($2::jsonb, stores), status_stores = COALESCE($3::jsonb, status_stores),
+         send_cadence = COALESCE($4::jsonb, send_cadence), status_cadence = COALESCE($5::jsonb, status_cadence)
+       WHERE id = $1 AND company_id = $6`,
+      [
+        session.id,
+        stores ? JSON.stringify(stores) : null,
+        statusStores ? JSON.stringify(statusStores) : null,
+        cadence ? JSON.stringify(cadence) : null,
+        statusCadence ? JSON.stringify(statusCadence) : null,
+        companyId
+      ]
+    );
+  }
+  const bots = await q<{ id: number; stores: unknown }>("SELECT id, stores FROM telegram_bots WHERE company_id = $1", [companyId]);
+  for (const bot of bots) {
+    const stores = listWithStore(bot.stores, marketplace);
+    if (stores) await q("UPDATE telegram_bots SET stores = $2::jsonb WHERE id = $1 AND company_id = $3", [bot.id, JSON.stringify(stores), companyId]);
+  }
+};
+
 app.put("/api/stores/:marketplace", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
@@ -1080,6 +1118,7 @@ app.put("/api/stores/:marketplace", auth, async (req, res, next) => {
        ON CONFLICT (company_id, marketplace) DO UPDATE SET enabled = EXCLUDED.enabled, public_config = EXCLUDED.public_config, secrets_enc = EXCLUDED.secrets_enc, updated_at = now()`,
       [companyId, marketplace, Boolean(req.body?.enabled), JSON.stringify(req.body?.config || {}), encrypt(JSON.stringify(nextSecrets))]
     );
+    if (req.body?.enabled === true) await rollOutStore(companyId, marketplace);
     res.json({ ok: true });
   } catch (err) {
     next(err);
