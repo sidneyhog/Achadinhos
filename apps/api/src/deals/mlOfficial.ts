@@ -188,26 +188,121 @@ const apiGet: MlGet = async path => {
   }
 };
 
+/**
+ * Só as 28 categorias de topo davam ~340 ofertas, e a empresa que publica a cada 5 min esgotava o acervo em menos
+ * de 3 dias (22% de repetição em 26/10/2026). As 403 subcategorias de 2º nível somam ~3.700 produtos de catálogo.
+ * Cada rodada lê um bloco de categorias e soma ao acervo; o preço é conferido de novo na hora de publicar.
+ */
+export const CATEGORIES_PER_LOAD = 40;
+export const POOL_HOURS = 12;
+const CATEGORY_LIST_MS = 24 * 3600 * 1000;
+
+/** Categorias de topo seguidas das subcategorias de 2º nível. Exportada para teste. */
+export const expandCategories = (
+  top: Record<string, string>,
+  children: Record<string, Array<{ id?: unknown; name?: unknown }>>
+): Record<string, string> => {
+  const all: Record<string, string> = { ...top };
+  for (const [parent, name] of Object.entries(top)) {
+    for (const child of children[parent] || []) {
+      const id = String(child?.id || "");
+      if (/^MLB\d+$/.test(id) && !all[id]) all[id] = `${name} > ${String(child?.name || "").trim()}`;
+    }
+  }
+  return all;
+};
+
+/** Próximo bloco do rodízio de categorias, voltando ao começo da lista. Exportada para teste. */
+export const categorySlice = (ids: string[], cursor: number, size: number): string[] => {
+  if (!ids.length) return [];
+  const start = ((cursor % ids.length) + ids.length) % ids.length;
+  return Array.from({ length: Math.min(size, ids.length) }, (_, index) => ids[(start + index) % ids.length]);
+};
+
+/** Junta a rodada nova ao acervo e tira o que passou de POOL_HOURS. Exportada para teste. */
+export const mergeOfficialPool = (
+  pool: Map<string, { at: number; offer: DealOffer }>,
+  fresh: DealOffer[],
+  now: number
+): DealOffer[] => {
+  for (const offer of fresh) pool.set(offer.externalId, { at: now, offer });
+  for (const [key, entry] of pool) {
+    if (now - entry.at > POOL_HOURS * 3600 * 1000) pool.delete(key);
+  }
+  return [...pool.values()].map(entry => entry.offer);
+};
+
+const categoryList = { at: 0, all: ML_HIGHLIGHT_CATEGORIES as Record<string, string> };
+
+const loadCategoryList = async (): Promise<Record<string, string>> => {
+  if (Date.now() - categoryList.at < CATEGORY_LIST_MS) return categoryList.all;
+  const children: Record<string, Array<{ id?: unknown; name?: unknown }>> = {};
+  await inBatches(Object.keys(ML_HIGHLIGHT_CATEGORIES), PARALLEL, async id => {
+    const detail = await apiGet(`/categories/${id}`);
+    children[id] = Array.isArray(detail?.children_categories) ? detail.children_categories : [];
+    return id;
+  });
+  const all = expandCategories(ML_HIGHLIGHT_CATEGORIES, children);
+  // Sem subcategoria nenhuma (ML fora do ar), tenta de novo na próxima rodada em vez de esperar 24 h.
+  if (Object.keys(all).length > Object.keys(ML_HIGHLIGHT_CATEGORIES).length) categoryList.at = Date.now();
+  categoryList.all = all;
+  return all;
+};
+
 /** Um acervo para todas as empresas: mais vendidos não dependem de quem pergunta. */
-const catalog = { at: 0, offers: [] as DealOffer[], loading: null as Promise<DealOffer[]> | null };
+const catalog = { at: 0, offers: [] as DealOffer[], cursor: 0, loading: null as Promise<DealOffer[]> | null };
+const officialPool = new Map<string, { at: number; offer: DealOffer }>();
 const searches = new Map<string, { at: number; offers: DealOffer[] }>();
 
 const loadCatalog = async (): Promise<DealOffer[]> => {
   if (catalog.offers.length && Date.now() - catalog.at < CACHE_MS) return catalog.offers;
   if (catalog.loading) return catalog.loading;
   catalog.loading = (async () => {
-    const products = await highlightProducts(apiGet, ML_HIGHLIGHT_CATEGORIES);
+    const all = await loadCategoryList();
+    const ids = Object.keys(all);
+    const slice = categorySlice(ids, catalog.cursor, CATEGORIES_PER_LOAD);
+    catalog.cursor = (catalog.cursor + slice.length) % Math.max(1, ids.length);
+    const chosen = Object.fromEntries(slice.map(id => [id, all[id]]));
+    const products = await highlightProducts(apiGet, chosen);
     const offers = await offersForProducts(apiGet, products);
     // Rodada vazia (ML fora do ar, limite) não apaga o acervo anterior.
-    if (offers.length) {
-      catalog.offers = offers;
-      catalog.at = Date.now();
-    }
+    catalog.offers = mergeOfficialPool(officialPool, offers, Date.now());
+    if (offers.length) catalog.at = Date.now();
     return catalog.offers;
   })().finally(() => {
     catalog.loading = null;
   });
   return catalog.loading;
+};
+
+const OFFICIAL_URL = /mercadolivre\.com\.br\/p\/(MLB\d+)\?pdp_filters=item_id:(MLB\d+)/;
+
+/**
+ * Oferta vinda da API oficial pode ter horas no acervo: confere o preço atual antes de publicar. Devolve a oferta
+ * atualizada, null se o desconto acabou, ou a mesma oferta se não for da API oficial ou o ML não responder.
+ */
+export const confirmOfficialMlOffer = async (offer: DealOffer, get: MlGet = apiGet): Promise<DealOffer | null> => {
+  const match = offer.url.match(OFFICIAL_URL);
+  if (offer.marketplace !== "ml" || !match) return offer;
+  let items: any;
+  try {
+    items = await get(`/products/${match[1]}/items?limit=20`);
+  } catch {
+    return offer;
+  }
+  const best = bestDiscountedItem(items?.results);
+  if (!best) return null;
+  const priceCents = Math.round(best.price * 100);
+  const originalPriceCents = Math.round(best.original * 100);
+  return {
+    ...offer,
+    externalId: best.itemId,
+    priceCents,
+    originalPriceCents,
+    discountPercent: Math.round(((originalPriceCents - priceCents) / originalPriceCents) * 100),
+    freeShipping: best.freeShipping,
+    url: offer.url.replace(`pdp_filters=item_id:${match[2]}`, `pdp_filters=item_id:${best.itemId}`)
+  };
 };
 
 const loadSearch = async (query: string): Promise<DealOffer[]> => {
@@ -224,6 +319,6 @@ const loadSearch = async (query: string): Promise<DealOffer[]> => {
   return offers;
 };
 
-/** Com palavra-chave, busca no catálogo; sem, usa os mais vendidos de todas as categorias. */
+/** Com palavra-chave, busca no catálogo; sem, usa os mais vendidos das categorias e subcategorias (em rodízio). */
 export const officialMlOffers = async (query: string): Promise<DealOffer[]> =>
   query.trim() ? loadSearch(query) : loadCatalog();

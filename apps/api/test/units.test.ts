@@ -251,6 +251,76 @@ test("Mercado Livre API oficial: mais vendidos viram ofertas com nome, foto, lin
   assert.equal(asked.includes("/products/MLB55762063"), false, "sem desconto, não gasta chamada buscando nome e foto");
 });
 
+test("ofertas do mesmo tipo não saem em sequência", async () => {
+  const { productTypeKeys, spreadByType } = await import("../src/deals/variety");
+  assert.deepEqual(productTypeKeys({ title: "Fone de Ouvido Bluetooth JBL Tune 520BT", category: "Eletrônicos, Áudio e Vídeo > Fones" }), ["cat:eletronicos, audio e video", "word:fone"]);
+  assert.deepEqual(productTypeKeys({ title: "Kit 2 Refil De Água Acqua Pure Electrolux" }), ["word:refil"], "'kit' e números não definem o tipo");
+  assert.deepEqual(productTypeKeys({ title: "Fones Bluetooth X", category: "na fila" }), ["word:fone"], "plural vira singular; etiqueta da fila não é categoria");
+
+  const item = (title: string, category = "") => ({ title, category });
+  const sorteio = [
+    item("Air Fryer Philco 6,5L", "Eletrodomésticos"),
+    item("Air Fryer Mondial 4L", "Eletrodomésticos"),
+    item("Air Fryer Fischer 8L", "Eletrodomésticos"),
+    item("Fone Bluetooth JBL", "Eletrônicos, Áudio e Vídeo"),
+    item("Whey Protein 900g", "Esportes e Fitness"),
+    item("Fone Bluetooth QCY", "Eletrônicos, Áudio e Vídeo"),
+    item("Lixeira Inteligente", "Casa, Móveis e Decoração")
+  ];
+  const ordem = spreadByType(sorteio).map(entry => entry.title);
+  assert.deepEqual(ordem.slice(0, 5), ["Air Fryer Philco 6,5L", "Fone Bluetooth JBL", "Whey Protein 900g", "Lixeira Inteligente", "Air Fryer Mondial 4L"], "intercala os tipos mantendo a ordem do sorteio");
+  assert.equal(ordem.length, sorteio.length, "nada some, só muda de lugar");
+  const depois = spreadByType(sorteio, ["cat:eletrodomesticos", "word:air"]).map(entry => entry.title);
+  assert.equal(depois[0], "Fone Bluetooth JBL", "tipo que saiu há pouco vai para o fim");
+  assert.deepEqual(spreadByType([item("Air Fryer A"), item("Air Fryer B")]).map(entry => entry.title), ["Air Fryer A", "Air Fryer B"], "só tem um tipo: segue a ordem");
+});
+
+test("Mercado Livre API oficial: acervo maior com subcategorias em rodízio", async () => {
+  const { expandCategories, categorySlice, mergeOfficialPool, POOL_HOURS } = await import("../src/deals/mlOfficial");
+  const all = expandCategories(
+    { MLB1574: "Casa, Móveis e Decoração", MLB1051: "Celulares e Telefones" },
+    { MLB1574: [{ id: "MLB1631", name: "Cozinha" }, { id: "x", name: "inválida" }], MLB1051: [{ id: "MLB1055", name: "Celulares e Smartphones" }] }
+  );
+  assert.deepEqual(Object.keys(all), ["MLB1574", "MLB1051", "MLB1631", "MLB1055"], "topo primeiro, depois as subcategorias");
+  assert.equal(all.MLB1631, "Casa, Móveis e Decoração > Cozinha");
+
+  const ids = ["a", "b", "c", "d", "e"];
+  assert.deepEqual(categorySlice(ids, 0, 2), ["a", "b"]);
+  assert.deepEqual(categorySlice(ids, 4, 3), ["e", "a", "b"], "volta ao começo da lista");
+  assert.deepEqual(categorySlice(ids, 0, 9), ids, "bloco maior que a lista não repete categoria");
+  assert.deepEqual(categorySlice([], 3, 2), []);
+
+  const offer = (id: string) => ({ externalId: id, title: id, priceCents: 100, url: "u", marketplace: "ml" as const });
+  const pool = new Map();
+  const now = Date.parse("2026-10-26T12:00:00Z");
+  mergeOfficialPool(pool, [offer("A"), offer("B")], now - (POOL_HOURS + 1) * 3600_000);
+  const merged = mergeOfficialPool(pool, [offer("B"), offer("C")], now);
+  assert.deepEqual(merged.map(item => item.externalId).sort(), ["B", "C"], "o que passou do prazo sai; o que voltou na rodada fica");
+});
+
+test("Mercado Livre API oficial: preço conferido na hora de publicar", async () => {
+  const { confirmOfficialMlOffer } = await import("../src/deals/mlOfficial");
+  const base = {
+    externalId: "MLB4217058289",
+    title: "Celular Samsung Galaxy A17",
+    priceCents: 139200,
+    originalPriceCents: 169900,
+    discountPercent: 18,
+    url: "https://www.mercadolivre.com.br/p/MLB54982411?pdp_filters=item_id:MLB4217058289&matt_word=empresa1",
+    marketplace: "ml" as const
+  };
+  const answer = (results: unknown) => async () => ({ results });
+  const mudou = await confirmOfficialMlOffer(base, answer([{ item_id: "MLB999", price: 1299, original_price: 1699, currency_id: "BRL", shipping: { free_shipping: true } }]));
+  assert.equal(mudou?.priceCents, 129900, "preço novo");
+  assert.equal(mudou?.discountPercent, 24);
+  assert.equal(mudou?.url, "https://www.mercadolivre.com.br/p/MLB54982411?pdp_filters=item_id:MLB999&matt_word=empresa1", "link aponta para o anúncio atual e mantém a tag");
+  assert.equal(await confirmOfficialMlOffer(base, answer([{ item_id: "MLB1", price: 1392, original_price: null, currency_id: "BRL" }])), null, "desconto acabou: não publica");
+  const falhou = await confirmOfficialMlOffer(base, async () => { throw new Error("timeout"); });
+  assert.equal(falhou, base, "ML fora do ar: publica como estava");
+  const pagina = { ...base, url: "https://produto.mercadolivre.com.br/MLB-123-x" };
+  assert.equal(await confirmOfficialMlOffer(pagina, async () => { throw new Error("não devia chamar"); }), pagina, "oferta que não veio da API oficial passa direto");
+});
+
 test("Mercado Livre API oficial: fica desligada sem as duas variáveis da stack", async () => {
   const { mlOfficialConfigured } = await import("../src/deals/mlOfficial");
   const saved = { id: process.env.ML_CLIENT_ID, secret: process.env.ML_CLIENT_SECRET };

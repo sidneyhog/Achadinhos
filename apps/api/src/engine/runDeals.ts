@@ -6,6 +6,7 @@ import { decrypt } from "../secrets";
 import { getLive, sendStatus, sendTextWithPreview, type LinkPreview } from "../zapo/session";
 import { groupCaption, isJpeg, jpegCandidates, previewText, statusCaption } from "../deals/messages";
 import { searchMercadoLivre, offerEndsSoonText } from "../deals/searchMercadoLivre";
+import { confirmOfficialMlOffer } from "../deals/mlOfficial";
 import { AMAZON_QUEUE_MAX, amazonQueueOffer } from "../deals/amazonExtension";
 import { amazonOffersFromLinks } from "../deals/amazonLinks";
 import { searchShopee } from "../deals/searchShopee";
@@ -16,7 +17,7 @@ import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
-import { URGENT_BONUS, varietyOrder } from "../deals/variety";
+import { URGENT_BONUS, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
 import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
@@ -65,6 +66,14 @@ type Campaign = {
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Últimos tipos de produto publicados por empresa, para o próximo lote começar por outro tipo. */
+const recentTypes = new Map<number, string[]>();
+const RECENT_TYPES_MAX = 12;
+const rememberType = (companyId: number, offer: DealOffer) => {
+  const list = [...productTypeKeys(offer), ...(recentTypes.get(companyId) || [])];
+  recentTypes.set(companyId, [...new Set(list)].slice(0, RECENT_TYPES_MAX));
+};
 
 /** Erro do WhatsApp que significa "o número não está mais neste grupo" (removido ou banido). Exportada para teste. */
 export const removedFromGroup = (err: unknown): boolean =>
@@ -638,8 +647,32 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       byStore.set(offer.marketplace, list);
     }
     for (const [marketplace, list] of byStore) {
-      const ordered = varietyOrder(list, offer => (offer.score || 0) + (offerEndsSoonText(offer.title) ? URGENT_BONUS : 0));
-      for (const offer of ordered) {
+      // Sorteio por pontuação e depois intercalado por tipo: sem três produtos parecidos seguidos, e o tipo que
+      // saiu há pouco nesta empresa vai para o fim.
+      const ordered = spreadByType(
+        varietyOrder(list, offer => (offer.score || 0) + (offerEndsSoonText(offer.title) ? URGENT_BONUS : 0)),
+        recentTypes.get(company.id) || []
+      );
+      // Algum grupo, Status ou bot ainda quer oferta desta loja nesta rodada? Sem isto o laço passava pelas até 300
+      // ofertas gerando um link meli.la para cada uma, mesmo com os lotes já completos.
+      const storeAllowed = (stores: string[]) => !stores.length || stores.includes(marketplace);
+      const stillWanted = () =>
+        bots.length > 0 ||
+        publishers.some(pub => {
+          if (pub.failed || (pub.posted.get(marketplace) || 0) >= pub.perCycle || !storeAllowed(pub.stores)) return false;
+          const last = pub.lastSent.get(marketplace) || 0;
+          return !last || Date.now() - last >= cadenceSeconds(pub.cadence, marketplace) * 1000;
+        }) ||
+        statusPubs.some(pub => {
+          if (pub.failed || pub.sentToday >= pub.perDay || (pub.posted.get(marketplace) || 0) >= pub.perCycle || !storeAllowed(pub.stores)) return false;
+          const last = pub.lastSent.get(marketplace) || 0;
+          return !last || Date.now() - last >= statusWait(pub.cadence, marketplace) * 1000;
+        });
+      for (const candidate of ordered) {
+        if (!stillWanted()) break;
+        // Oferta da API oficial do ML pode ter horas no acervo: preço conferido agora, e pula se o desconto acabou.
+        const offer = candidate.marketplace === "ml" ? await confirmOfficialMlOffer(candidate) : candidate;
+        if (!offer) continue;
         let published = offer.url;
         if (offer.marketplace === "ml" && current.ml_official && current.ml_cookie_enc) {
           try {
@@ -711,7 +744,10 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
           }
           // "Ofertas por vez" conta ofertas, não grupos. A cadência vale para o lote: lastSent fica com o
           // horário do último envio antes desta rodada, então as próximas ofertas do lote não esperam a cadência.
-          if (delivered) pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
+          if (delivered) {
+            pub.posted.set(marketplace, (pub.posted.get(marketplace) || 0) + 1);
+            rememberType(company.id, offer);
+          }
         }
         for (const pub of statusPubs) {
           if (pub.failed || pub.sentToday >= pub.perDay) continue;
