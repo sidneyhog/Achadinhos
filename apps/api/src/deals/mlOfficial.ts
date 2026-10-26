@@ -259,8 +259,12 @@ const catalog = { at: 0, offers: [] as DealOffer[], cursor: 0, loading: null as 
 const officialPool = new Map<string, { at: number; offer: DealOffer }>();
 const searches = new Map<string, { at: number; offers: DealOffer[] }>();
 
+/** Acervo pequeno (logo depois de reiniciar o worker): novo bloco de categorias a cada 10 min em vez de 30. Exportada para teste. */
+export const SMALL_POOL = 1500;
+export const catalogRefreshMs = (poolSize: number) => (poolSize < SMALL_POOL ? 10 * 60 * 1000 : CACHE_MS);
+
 const loadCatalog = async (): Promise<DealOffer[]> => {
-  if (catalog.offers.length && Date.now() - catalog.at < CACHE_MS) return catalog.offers;
+  if (catalog.offers.length && Date.now() - catalog.at < catalogRefreshMs(catalog.offers.length)) return catalog.offers;
   if (catalog.loading) return catalog.loading;
   catalog.loading = (async () => {
     const all = await loadCategoryList();

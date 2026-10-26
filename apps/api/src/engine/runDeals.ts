@@ -646,6 +646,25 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       list.push(offer);
       byStore.set(offer.marketplace, list);
     }
+    // O que cada destino (grupo ou Status de uma conexão) já recebeu nas últimas REPEAT_HOURS: uma consulta por rodada.
+    const seenRows = await q<{ group_jid: string; whatsapp_id: number | null; marketplace: string; external_id: string; tk: string }>(
+      `SELECT group_jid, whatsapp_id, marketplace, external_id, ${TITLE_KEY_SQL} AS tk FROM posts
+       WHERE company_id = $1 AND status = 'sent' AND ${REPEAT_SQL}`,
+      [company.id]
+    );
+    const seenBy = new Map<string, Set<string>>();
+    for (const row of seenRows) {
+      const dest = row.group_jid === STATUS_JID ? `status:${row.whatsapp_id}` : `group:${row.group_jid}`;
+      const keys = seenBy.get(dest) || new Set<string>();
+      keys.add(`id:${row.marketplace}:${row.external_id}`);
+      keys.add(`tk:${row.tk}`);
+      seenBy.set(dest, keys);
+    }
+    const seenAt = (dest: string, offer: DealOffer) => {
+      const keys = seenBy.get(dest);
+      return Boolean(keys && (keys.has(`id:${offer.marketplace}:${offer.externalId}`) || keys.has(`tk:${titleKey(offer.title)}`)));
+    };
+
     for (const [marketplace, list] of byStore) {
       // Sorteio por pontuação e depois intercalado por tipo: sem três produtos parecidos seguidos, e o tipo que
       // saiu há pouco nesta empresa vai para o fim.
@@ -656,18 +675,23 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       // Algum grupo, Status ou bot ainda quer oferta desta loja nesta rodada? Sem isto o laço passava pelas até 300
       // ofertas gerando um link meli.la para cada uma, mesmo com os lotes já completos.
       const storeAllowed = (stores: string[]) => !stores.length || stores.includes(marketplace);
-      const stillWanted = () =>
+      const groupWants = (pub: (typeof publishers)[number]) => {
+        if (pub.failed || (pub.posted.get(marketplace) || 0) >= pub.perCycle || !storeAllowed(pub.stores)) return false;
+        const last = pub.lastSent.get(marketplace) || 0;
+        return !last || Date.now() - last >= cadenceSeconds(pub.cadence, marketplace) * 1000;
+      };
+      const statusWants = (pub: (typeof statusPubs)[number]) => {
+        if (pub.failed || pub.sentToday >= pub.perDay || (pub.posted.get(marketplace) || 0) >= pub.perCycle || !storeAllowed(pub.stores)) return false;
+        const last = pub.lastSent.get(marketplace) || 0;
+        return !last || Date.now() - last >= statusWait(pub.cadence, marketplace) * 1000;
+      };
+      const stillWanted = () => bots.length > 0 || publishers.some(groupWants) || statusPubs.some(statusWants);
+      // Alguém que ainda quer oferta ainda não recebeu esta? Checado antes de consultar o preço no ML: sem isto a
+      // rodada consultava o preço de centenas de ofertas já publicadas, levava 3 min e só sobrava tempo para 1 envio.
+      const neededSomewhere = (offer: DealOffer) =>
         bots.length > 0 ||
-        publishers.some(pub => {
-          if (pub.failed || (pub.posted.get(marketplace) || 0) >= pub.perCycle || !storeAllowed(pub.stores)) return false;
-          const last = pub.lastSent.get(marketplace) || 0;
-          return !last || Date.now() - last >= cadenceSeconds(pub.cadence, marketplace) * 1000;
-        }) ||
-        statusPubs.some(pub => {
-          if (pub.failed || pub.sentToday >= pub.perDay || (pub.posted.get(marketplace) || 0) >= pub.perCycle || !storeAllowed(pub.stores)) return false;
-          const last = pub.lastSent.get(marketplace) || 0;
-          return !last || Date.now() - last >= statusWait(pub.cadence, marketplace) * 1000;
-        });
+        publishers.some(pub => groupWants(pub) && pub.groups.some(group => !pub.badGroups.has(group.group_jid) && !seenAt(`group:${group.group_jid}`, offer))) ||
+        statusPubs.some(pub => statusWants(pub) && !seenAt(`status:${pub.id}`, offer));
       // Tipo decidido na hora do envio, pelo que os grupos de fato receberam: a ordem intercalada não basta, porque
       // boa parte dela já saiu nas últimas 72 h e é pulada, e o que sobrava (5 produtos de carro) saía em sequência.
       // Oferta do mesmo tipo de uma das últimas enviadas vai para o fim; só volta se não houver outra opção.
@@ -686,6 +710,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
         }
         const candidate = queue[index];
         if (!stillWanted()) break;
+        if (!neededSomewhere(candidate)) continue;
         if (!relaxed && sameTypeAsRecent(candidate)) {
           deferred.push(candidate);
           continue;

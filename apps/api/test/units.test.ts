@@ -295,6 +295,10 @@ test("Mercado Livre API oficial: acervo maior com subcategorias em rodízio", as
   assert.deepEqual(categorySlice(ids, 0, 9), ids, "bloco maior que a lista não repete categoria");
   assert.deepEqual(categorySlice([], 3, 2), []);
 
+  const { catalogRefreshMs } = await import("../src/deals/mlOfficial");
+  assert.equal(catalogRefreshMs(300), 10 * 60 * 1000, "acervo pequeno enche mais rápido");
+  assert.equal(catalogRefreshMs(2500), 30 * 60 * 1000);
+
   const offer = (id: string) => ({ externalId: id, title: id, priceCents: 100, url: "u", marketplace: "ml" as const });
   const pool = new Map();
   const now = Date.parse("2026-10-26T12:00:00Z");
