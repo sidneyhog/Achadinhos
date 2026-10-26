@@ -283,6 +283,11 @@ test("Mercado Livre API oficial: acervo maior com subcategorias em rodízio", as
   );
   assert.deepEqual(Object.keys(all), ["MLB1574", "MLB1051", "MLB1631", "MLB1055"], "topo primeiro, depois as subcategorias");
   assert.equal(all.MLB1631, "Casa, Móveis e Decoração > Cozinha");
+  const misturado = expandCategories(
+    { MLB5672: "Acessórios para Veículos", MLB1246: "Beleza" },
+    { MLB5672: [{ id: "MLB1", name: "Peças" }, { id: "MLB2", name: "Som" }, { id: "MLB3", name: "Limpeza" }], MLB1246: [{ id: "MLB9", name: "Cabelos" }] }
+  );
+  assert.deepEqual(Object.keys(misturado), ["MLB5672", "MLB1246", "MLB1", "MLB9", "MLB2", "MLB3"], "subcategorias intercaladas entre as categorias-mãe");
 
   const ids = ["a", "b", "c", "d", "e"];
   assert.deepEqual(categorySlice(ids, 0, 2), ["a", "b"]);

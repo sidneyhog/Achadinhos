@@ -203,8 +203,13 @@ export const expandCategories = (
   children: Record<string, Array<{ id?: unknown; name?: unknown }>>
 ): Record<string, string> => {
   const all: Record<string, string> = { ...top };
-  for (const [parent, name] of Object.entries(top)) {
-    for (const child of children[parent] || []) {
+  // Uma subcategoria de cada categoria-mãe por vez: em ordem, o primeiro bloco do rodízio pegava 12 subcategorias de
+  // "Acessórios para Veículos" e o grupo recebeu cinco produtos de carro seguidos (26/10/2026).
+  const lists = Object.entries(top).map(([parent, name]) => ({ name, kids: children[parent] || [] }));
+  const longest = Math.max(0, ...lists.map(list => list.kids.length));
+  for (let index = 0; index < longest; index += 1) {
+    for (const { name, kids } of lists) {
+      const child = kids[index];
       const id = String(child?.id || "");
       if (/^MLB\d+$/.test(id) && !all[id]) all[id] = `${name} > ${String(child?.name || "").trim()}`;
     }

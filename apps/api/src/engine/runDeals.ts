@@ -17,7 +17,7 @@ import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
-import { URGENT_BONUS, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
+import { TYPE_GAP, URGENT_BONUS, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
 import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
@@ -668,8 +668,28 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
           const last = pub.lastSent.get(marketplace) || 0;
           return !last || Date.now() - last >= statusWait(pub.cadence, marketplace) * 1000;
         });
-      for (const candidate of ordered) {
+      // Tipo decidido na hora do envio, pelo que os grupos de fato receberam: a ordem intercalada não basta, porque
+      // boa parte dela já saiu nas últimas 72 h e é pulada, e o que sobrava (5 produtos de carro) saía em sequência.
+      // Oferta do mesmo tipo de uma das últimas enviadas vai para o fim; só volta se não houver outra opção.
+      const queue = [...ordered];
+      const deferred: DealOffer[] = [];
+      let relaxed = false;
+      const sameTypeAsRecent = (offer: DealOffer) => {
+        const recent = new Set((recentTypes.get(company.id) || []).slice(0, TYPE_GAP * 2));
+        return productTypeKeys(offer).some(key => recent.has(key));
+      };
+      for (let index = 0; ; index += 1) {
+        if (index >= queue.length) {
+          if (relaxed || !deferred.length) break;
+          relaxed = true;
+          queue.push(...deferred.splice(0));
+        }
+        const candidate = queue[index];
         if (!stillWanted()) break;
+        if (!relaxed && sameTypeAsRecent(candidate)) {
+          deferred.push(candidate);
+          continue;
+        }
         // Oferta da API oficial do ML pode ter horas no acervo: preço conferido agora, e pula se o desconto acabou.
         const offer = candidate.marketplace === "ml" ? await confirmOfficialMlOffer(candidate) : candidate;
         if (!offer) continue;
