@@ -28,6 +28,7 @@ import { DealOffer, marketplaceLabel, scoreOffer } from "../deals/types";
 
 type Setting = {
   company_id: number;
+  short_group_text?: boolean;
   enabled: boolean;
   hour_start: number | null;
   hour_end: number | null;
@@ -760,7 +761,9 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             const token = crypto.randomBytes(8).toString("hex");
             try {
               // Só texto: a imagem chega pelo cartão de prévia do link e não pesa o celular de quem está no grupo.
-              await sendTextWithPreview(pub.id, group.group_jid, caption(offer, published), await previewOf());
+              // A empresa escolhe: texto completo (padrão) ou o mesmo texto curto do Status.
+              const text = current.short_group_text ? statusCaption(offer, published) : caption(offer, published);
+              await sendTextWithPreview(pub.id, group.group_jid, text, await previewOf());
               await q(
                 `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sent',$10,$11)`,
