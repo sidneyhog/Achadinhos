@@ -4,7 +4,7 @@ import { audit, q } from "../db";
 import { withLock } from "../locks";
 import { decrypt } from "../secrets";
 import { getLive, sendStatus, sendTextWithPreview, type LinkPreview } from "../zapo/session";
-import { groupCaption, isJpeg, jpegCandidates, previewText, statusCaption } from "../deals/messages";
+import { isJpeg, jpegCandidates, previewText, statusCaption } from "../deals/messages";
 import { searchMercadoLivre, offerEndsSoonText } from "../deals/searchMercadoLivre";
 import { confirmOfficialMlOffer } from "../deals/mlOfficial";
 import { AMAZON_QUEUE_MAX, amazonQueueOffer } from "../deals/amazonExtension";
@@ -28,7 +28,6 @@ import { DealOffer, marketplaceLabel, scoreOffer } from "../deals/types";
 
 type Setting = {
   company_id: number;
-  short_group_text?: boolean;
   enabled: boolean;
   hour_start: number | null;
   hour_end: number | null;
@@ -96,8 +95,8 @@ const secretsOf = (row: StoreRow): Record<string, string> => {
   }
 };
 
-/** Texto dos grupos e do Telegram (formato de sempre). */
-const caption = groupCaption;
+// Grupos, Status e Telegram usam o mesmo texto curto (um padrão só para todas as empresas).
+const caption = statusCaption;
 
 /** Baixa a imagem do produto em JPEG (a prévia do link e o Status exigem JPEG). Devolve undefined se não conseguir. */
 const loadJpeg = async (imageUrl?: string): Promise<Uint8Array | undefined> => {
@@ -761,9 +760,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             const token = crypto.randomBytes(8).toString("hex");
             try {
               // Só texto: a imagem chega pelo cartão de prévia do link e não pesa o celular de quem está no grupo.
-              // A empresa escolhe: texto completo (padrão) ou o mesmo texto curto do Status.
-              const text = current.short_group_text ? statusCaption(offer, published) : caption(offer, published);
-              await sendTextWithPreview(pub.id, group.group_jid, text, await previewOf());
+              await sendTextWithPreview(pub.id, group.group_jid, caption(offer, published), await previewOf());
               await q(
                 `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sent',$10,$11)`,

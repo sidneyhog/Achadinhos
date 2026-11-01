@@ -1041,7 +1041,6 @@ app.put("/api/settings", auth, async (req, res, next) => {
     if ("blockedCategories" in body) set("blocked_categories", body.blockedCategories == null ? "" : String(body.blockedCategories));
     if ("sendAllGroups" in body) set("send_all_groups", Boolean(body.sendAllGroups));
     if ("randomCatalog" in body) set("random_catalog", Boolean(body.randomCatalog));
-    if ("shortGroupText" in body) set("short_group_text", Boolean(body.shortGroupText));
     if ("postsPerCycle" in body) set("posts_per_cycle", asInt(body.postsPerCycle) ?? 1);
     if ("intervalSeconds" in body) set("interval_seconds", asInt(body.intervalSeconds) ?? 20);
     if ("sendCadence" in body) set("send_cadence", JSON.stringify(body.sendCadence || {}), "::jsonb");

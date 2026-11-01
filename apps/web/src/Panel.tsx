@@ -2382,7 +2382,6 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
               {configTab === "geral" && (
                 <div className="aff-prefs">
                   <div className="aff-switchrow"><div><strong>Mercado Livre aleatório</strong><p>Ignora as palavras das campanhas e busca ofertas gerais do catálogo.</p></div><button type="button" className={`aff-switch${setting?.random_catalog !== false ? " is-on" : ""}`} onClick={() => saveSetting({ randomCatalog: setting?.random_catalog === false }, "O modo do Mercado Livre foi atualizado.")}><i /></button></div>
-                  <div className="aff-switchrow"><div><strong>Texto curto nos grupos</strong><p>Usa nos grupos o mesmo formato curto do Status. Desligado, os grupos recebem o texto completo.</p></div><button type="button" className={`aff-switch${setting?.short_group_text ? " is-on" : ""}`} onClick={() => saveSetting({ shortGroupText: !setting?.short_group_text }, setting?.short_group_text ? "Os grupos voltam a receber o texto completo." : "Os grupos passam a receber o texto curto.")}><i /></button></div>
                   <div className="aff-switchrow"><div><strong>Publicar em todos os grupos</strong><p>Envia para todos os grupos desta conexão. Desligado, só os grupos marcados recebem.</p></div><button type="button" className={`aff-switch${setting?.send_all_groups ? " is-on" : ""}`} onClick={() => saveSetting({ sendAllGroups: !setting?.send_all_groups }, "O envio para os grupos foi atualizado.")}><i /></button></div>
                 </div>
               )}
