@@ -76,19 +76,40 @@ export const readPrices = (text: string): { priceCents: number; originalPriceCen
   return { priceCents, originalPriceCents: priceCents && original > priceCents ? original : null };
 };
 
-/** Nome do produto: a primeira linha com texto de verdade, sem enfeites nem chamadas de oferta. Exportada para teste. */
+/**
+ * Nome do produto. Muitos canais abrem a postagem com um bordão ("PRA ANDAR NO ESTILO!", "Acabou de sair"),
+ * então cada uma das primeiras linhas ganha nota e vence a que mais parece nome de produto: mais comprida,
+ * com número ou medida, sem maiúsculas gritadas nem "!" no fim. Exportada para teste.
+ */
 export const readTitle = (text: string) => {
-  for (const line of text.split("\n")) {
-    const clean = line
+  let best = "";
+  let bestScore = -Infinity;
+  const lines = text
+    .split("\n")
+    .map(line => line
       .replace(/https?:\/\/\S+/g, "")
       .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, "")
       .replace(/^[\s\-–•*|:>»]+|[\s\-–•*|:]+$/g, "")
-      .trim();
+      .trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  for (const clean of lines) {
     if (clean.length < 8 || /R\$/.test(clean)) continue;
-    if (/^(oferta|promo(ção)?|corre|achadinho|imperd[ií]vel|bug|cupom|link|compre aqui|confira|aproveite)\b/i.test(clean) && clean.length < 25) continue;
-    return clean.slice(0, 140);
+    if (/^(oferta|promo(ção)?|corre|achadinho|imperd[ií]vel|bug|cupom|link|compre aqui|confira|aproveite|acabou de sair|vers[aã]o|esquenta|leve mais|link para|pre[cç]o pode)\b/i.test(clean) || /pode ser alterad|sujeit[oa] a altera/i.test(clean)) continue;
+    const letters = clean.replace(/[^A-Za-zÀ-ÿ]/g, "");
+    const upper = letters.replace(/[^A-ZÀ-Þ]/g, "").length / Math.max(1, letters.length);
+    let score = Math.min(clean.length, 80) / 10;
+    if (/\d/.test(clean)) score += 3;
+    if (/\b\d+([.,]\d+)?\s?(gb|tb|w|v|l|ml|kg|g|cm|mm|pol|"|hz|btu|mah|fios|pçs|pcs|un)\b/i.test(clean)) score += 3;
+    if (upper > 0.7 && letters.length > 6) score -= 6;
+    if (/[!?]$/.test(clean)) score -= 4;
+    if (clean.split(" ").length < 3) score -= 3;
+    if (score > bestScore) {
+      bestScore = score;
+      best = clean;
+    }
   }
-  return "";
+  return best.slice(0, 140);
 };
 
 /** Postagens da página t.me/s/<canal>. Exportada para teste. */
@@ -102,7 +123,9 @@ export const readChannelPage = (html: string, source: string): SourcePost[] => {
     const text = decode(textHtml);
     const hrefs = [...textHtml.matchAll(/href="([^"]+)"/g)].map(match => decode(match[1]));
     const inText = text.match(/https?:\/\/\S+/g) || [];
-    const links = [...new Set([...hrefs, ...inText])].filter(link => /amzn\.to\/|amazon\.com\.br\//i.test(link));
+    // Link direto da Amazon primeiro; depois os de encurtadores e sites de oferta, que podem redirecionar até a Amazon.
+    const all = [...new Set([...hrefs, ...inText])].filter(link => /^https?:\/\//i.test(link) && !/^https?:\/\/(t\.me|telegram\.(me|org))\//i.test(link));
+    const links = [...all.filter(link => /amzn\.to\/|amazon\.com\.br\//i.test(link)), ...all.filter(link => !/amzn\.to\/|amazon\.com\.br\//i.test(link))].slice(0, 4);
     if (!links.length) continue;
     const { priceCents, originalPriceCents } = readPrices(text);
     const title = readTitle(text);
@@ -129,19 +152,45 @@ export const asinFromUrl = (url: string) =>
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
 const shortLinks = new Map<string, string>();
 
-/** amzn.to → endereço do produto, seguindo só o redirecionamento do encurtador (o site da Amazon não é aberto). */
+/** Endereço no site da Amazon (não no encurtador amzn.to): esse nunca é aberto pelo robô. */
+const isAmazonSite = (url: string) => /^https?:\/\/([\w-]+\.)*amazon\.com(\.br)?(\/|$|\?)/i.test(url);
+
+/**
+ * Produto (ASIN) de um link da postagem. Segue até 4 redirecionamentos de encurtadores e sites de oferta
+ * (amzn.to, bit.ly, links de afiliado dos canais...) lendo só o cabeçalho Location de cada salto, e para
+ * assim que o próximo endereço é da Amazon: o site da Amazon nunca é aberto.
+ */
 export const resolveAsin = async (link: string): Promise<string> => {
   const direct = asinFromUrl(link);
   if (direct) return direct;
-  if (!/^https?:\/\/amzn\.to\/[A-Za-z0-9]+/i.test(link)) return "";
+  if (isAmazonSite(link)) return "";
   const cached = shortLinks.get(link);
   if (cached != null) return cached;
   let asin = "";
-  try {
-    const response = await axios.get(link, { maxRedirects: 0, validateStatus: status => status >= 300 && status < 400, timeout: 10000, headers: { "User-Agent": UA } });
-    asin = asinFromUrl(String(response.headers.location || ""));
-  } catch {
-    asin = "";
+  let url = link;
+  for (let hop = 0; hop < 4; hop += 1) {
+    let location = "";
+    try {
+      const response = await axios.get(url, {
+        maxRedirects: 0,
+        validateStatus: status => status >= 200 && status < 400,
+        timeout: 10000,
+        maxContentLength: 512 * 1024,
+        responseType: "text",
+        headers: { "User-Agent": UA, Accept: "text/html" }
+      });
+      location = String(response.headers.location || "");
+    } catch {
+      break;
+    }
+    if (!location) break;
+    try {
+      url = new URL(location, url).toString();
+    } catch {
+      break;
+    }
+    asin = asinFromUrl(url);
+    if (asin || isAmazonSite(url)) break;
   }
   shortLinks.set(link, asin);
   if (shortLinks.size > 5000) shortLinks.delete(shortLinks.keys().next().value as string);

@@ -244,9 +244,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     portal: ["Abrir o Amazon Associados", "https://associados.amazon.com.br"],
     steps: [
       "No Amazon Associados, copie a sua Partner Tag (termina em -20). Também pode colar um link seu com tag=.",
-      "Jeito rápido: instale a extensão do Achadinhos (página Automação), cole o código do painel nela e, na página de qualquer produto da Amazon, clique em Enviar ao Achadinhos. Nome, preço, preço antigo e foto vão juntos, e o produto fica 24 h na fila.",
-      "Também dá para colar em Links dos produtos, um por linha: link | nome | preço (link da página ou o curto amzn.to da SiteStripe).",
-      "A busca automática depende da Creators API da Amazon, liberada com 10 vendas em 30 dias. Até lá, use o botão da extensão."
+      "Cole a tag aqui, ative a Amazon e salve. Pronto: o robô publica sozinho as promoções da Amazon que o Achadinhos acompanha o dia todo, sempre com a sua tag. Não precisa de PC nem de celular.",
+      "Opcional: com a extensão do Achadinhos (página Automação), clique em Enviar ao Achadinhos na página de um produto da Amazon para escolher produtos você mesmo. Eles entram na frente da fila por 24 h.",
+      "Também dá para colar em Links dos produtos, um por linha: link | nome | preço (link da página ou o curto amzn.to da SiteStripe)."
     ]
   },
   awin: {

@@ -704,7 +704,9 @@ test("Fontes da Amazon: lê postagens do canal, preço, nome, foto e produto", a
     + post(2, "Sem link de loja nenhuma R$ 10")
     + post(3, "Kindle 11ª geração<br/>por R$ 449,00<br/><a href=\"https://www.amazon.com.br/dp/B0CP31L73X?tag=outro-20\">link</a>");
   const posts = readChannelPage(html, "canal");
-  assert.equal(posts.length, 2, "postagem sem link da Amazon fica de fora");
+  assert.equal(posts.length, 2, "postagem sem link nenhum fica de fora");
+  const encurtado = readChannelPage(post(9, "Fone Bluetooth JBL Tune<br/>por R$ 199,90<br/><a href=\"https://bit.ly/abc\">link</a> <a href=\"https://t.me/canal\">canal</a>"), "canal");
+  assert.deepEqual(encurtado[0].links, ["https://bit.ly/abc"], "link de encurtador entra para ser seguido; link do Telegram não");
   assert.equal(posts[0].title, "Micro-ondas Philco 20L");
   assert.equal(posts[0].priceCents, 29900);
   assert.equal(posts[0].imageUrl, "https://cdn4.telesco.pe/file/abc1.jpg");
@@ -730,4 +732,17 @@ test("filtros da tela Publicações: só aceitam valores conhecidos", async () =
   assert.deepEqual([ruim.by, ruim.period, ruim.store, ruim.dest, ruim.status], ["posts", "7d", "", "", ""], "valor estranho vira o padrão");
   assert.equal(readPostFilter({ dest: "status" }).dest, "status");
   assert.equal(readPostFilter({ dest: "telegram" }).dest, "telegram");
+});
+
+test("Fontes da Amazon: nome do produto, não o bordão do canal", async () => {
+  const { readTitle } = await import("../src/deals/telegramSources");
+  assert.equal(readTitle("PRA ANDAR NO ESTILO!\nTênis Puma Smash V2 Masculino\nR$ 254"), "Tênis Puma Smash V2 Masculino");
+  assert.equal(readTitle("Acabou de sair\nSmartphone Samsung Galaxy A36 5G 128GB\nR$ 999"), "Smartphone Samsung Galaxy A36 5G 128GB");
+  assert.equal(readTitle("Geladeira TOP de linha, side by side.\nR$ 2.766"), "Geladeira TOP de linha, side by side.");
+  assert.equal(readTitle("Jogo de Lençol 400 Fios Ponto Palito Cama Queen 3 Pçs\nR$ 25"), "Jogo de Lençol 400 Fios Ponto Palito Cama Queen 3 Pçs");
+});
+
+test("Fontes da Amazon: aviso de preço não vira nome", async () => {
+  const { readTitle } = await import("../src/deals/telegramSources");
+  assert.equal(readTitle("Preço pode ser alterado a qualquer momento\nProtetor Solar Skin Aqua FPS50 40g\nR$ 43"), "Protetor Solar Skin Aqua FPS50 40g");
 });
