@@ -196,7 +196,7 @@ const GUIDES = [
   ["telegram", "TG", "Telegram", "Implementação parcial", "Publicar no Telegram", "8 min · Primeiros passos · Iniciante", "Dá para ter vários bots. Cada um fica com a própria loja ou categoria."],
   ["ml", "ML", "Mercado Livre", "Implementado", "Configurar o Mercado Livre", "10 min · Lojas · Intermediário", "Conta e Matt Tool saem de um link seu. Cookie só entra no link oficial."],
   ["amazon", "AM", "Amazon", "Implementado", "Configurar a Amazon", "5 min · Lojas · Iniciante", "Basta a Partner Tag: o robô publica as promoções da Amazon com a sua tag, sem PC."],
-  ["shopee", "SP", "Shopee", "Implementado", "Configurar a Shopee", "15 min · Lojas · Avançado", "App ID e Secret da API de afiliados da Shopee, pedidos na sua conta de afiliado."],
+  ["shopee", "SP", "Shopee", "Implementado", "Configurar a Shopee", "15 min + até 3 dias úteis · Lojas · Avançado", "Como pedir a API de afiliados da Shopee (formulário \"Quero ativar a API\") e onde colar o AppID e a Senha."],
   ["magalu", "MG", "Magalu", "Implementado", "Configurar a Magalu", "5 min · Lojas · Iniciante", "O endereço da sua loja Parceiro Magalu. O robô busca as ofertas sozinho."],
   ["ali", "AE", "AliExpress", "Em breve", "AliExpress", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."],
   ["awin", "AW", "Awin", "Em breve", "Awin, Clube Samsung e Casas Bahia", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."],
@@ -225,12 +225,16 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
   },
   shopee: {
     auto: true,
-    time: "15 min",
+    time: "15 min + até 3 dias úteis",
     portal: ["Abrir o portal de afiliados da Shopee", "https://affiliate.shopee.com.br"],
     steps: [
-      "No portal de afiliados da Shopee, abra a área Open API e peça o acesso. A liberação pode levar alguns dias.",
-      "Com o acesso liberado, copie o App ID e o Secret que a Shopee mostra.",
-      "Cole os dois aqui, marque Publicar esta loja e salve."
+      "Tenha o cadastro aprovado no programa de afiliados da Shopee (affiliate.shopee.com.br) e anote o seu ID de Afiliado: ele aparece no portal, no seu perfil, no canto superior direito.",
+      "No portal, abra o menu Abrir API. Se aparecer \"AppID: --\" e \"No momento você não possui acesso à Plataforma de Open API\", é preciso pedir a liberação à Shopee.",
+      "Para pedir: abra a Central de Ajuda do Afiliado (help.shopee.com.br/portal/10) e clique em Fale conosco por e-mail. Abre um formulário já logado na sua conta Shopee.",
+      "Preencha: \"Você já é Afiliado da Shopee?\" → Sim. \"Você está com problemas para efetuar o login…?\" → Não, estou com outras dificuldades / dúvidas. ID de Afiliado → o seu. Telefone → o mesmo cadastrado no programa de afiliados.",
+      "Em \"Selecione o tema\" escolha Tenho dúvidas/dificuldades com meu cadastro / conta. Em \"Selecione qual o cenário\" escolha Quero ativar a API. Clique em Enviar: a tela mostra \"Enviado com sucesso\".",
+      "A Shopee responde em até 3 dias úteis. Com o acesso liberado, a página Abrir API mostra o AppID e a Senha (se aparecer o botão Aplicar, clique nele).",
+      "Aqui no Achadinhos: cole o AppID em App ID e a Senha em Secret, marque Publicar esta loja e salve. Cada empresa usa a própria conta de afiliado, então o link sai com a sua comissão."
     ]
   },
   aliexpress: {
