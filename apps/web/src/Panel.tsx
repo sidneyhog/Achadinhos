@@ -327,13 +327,13 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     ]
   },
   magalu: {
-    auto: false,
+    auto: true,
     time: "5 min",
     portal: ["Abrir o Parceiro Magalu", "https://www.magazinevoce.com.br"],
     steps: [
-      "Copie o nome da sua loja (o final do endereço da sua loja Magalu) e o seu Promoter Id.",
-      "Cole os dois aqui e salve.",
-      "A Magalu não entrega lista de produtos, então o robô não publica Magalu sozinho."
+      "Abra a sua loja no Parceiro Magalu e copie o endereço dela (ex.: magazinevoce.com.br/magazinein_3139904).",
+      "Cole o endereço (ou só o nome da loja) e o seu Promoter Id aqui e salve.",
+      "O robô busca as ofertas da Magalu sozinho, por categoria e pelas palavras das suas campanhas, e publica com o link da sua loja."
     ]
   },
   terabyte: {
@@ -391,7 +391,7 @@ const GUIDE_STEPS: Record<string, string[]> = {
 
 const EXTRA_FORMS: Record<string, { hint: string; fields: Array<{ key: string; label: string; placeholder: string; secret?: boolean; locked?: boolean }> }> = {
   magalu: {
-    hint: "O nome da loja é o endereço da Magazine Você. O Promoter Id identifica a conta. O programa não entrega uma lista de produtos, então o card pode ficar conectado sem publicação no grupo.",
+    hint: "Cole o endereço da sua loja do Parceiro Magalu (ex.: magazinevoce.com.br/magazinein_3139904) ou só o nome dela. O robô busca as ofertas da Magalu sozinho e publica com o link da sua loja.",
     fields: [
       { key: "storeName", label: "Nome da loja", placeholder: "minha-loja" },
       { key: "promoterId", label: "Promoter Id", placeholder: "Código do promoter" }

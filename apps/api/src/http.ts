@@ -214,7 +214,7 @@ const publicStore = (row: { marketplace: string; enabled: boolean; public_config
     secrets: reveal ? secrets : {},
     hasSecrets: Object.keys(secrets).length > 0,
     secretKeys: Object.keys(secrets),
-    publishes: !["magalu", "shein", "terabyte"].includes(row.marketplace)
+    publishes: !["shein", "terabyte"].includes(row.marketplace)
   };
 };
 

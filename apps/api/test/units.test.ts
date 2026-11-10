@@ -654,3 +654,30 @@ test("link curto: código de 7 caracteres na raiz, sem bater com páginas do pai
   assert.equal(trackedUrl("https://l.exemplo.com", "aB3x9Kp"), "https://l.exemplo.com/aB3x9Kp");
   assert.equal(trackedUrl("https://l.exemplo.com", "43c9cfef9360e53a"), "https://l.exemplo.com/go/43c9cfef9360e53a");
 });
+
+test("Magalu: lê produtos da vitrine e monta o link na loja de cada cliente", async () => {
+  const { magaluStoreSlug, magaluAffiliateUrl, magaluOffersFromPage, magaluSourcesFor, MAGALU_CATEGORIES } = await import("../src/deals/searchMagalu");
+  assert.equal(magaluStoreSlug("https://www.magazinevoce.com.br/magazinein_3139904/"), "magazinein_3139904");
+  assert.equal(magaluStoreSlug("magazinein_3139904"), "magazinein_3139904");
+  assert.equal(magaluStoreSlug("", "in_3139904"), "magazinein_3139904");
+  assert.equal(magaluStoreSlug("loja com espaço"), "");
+  const caminho = "/magazinein_3139904/air-fryer-philco-paf65a-preto-65l/p/240398500/ep/fryr/";
+  assert.equal(magaluAffiliateUrl(caminho, "magazinerobson"), "https://www.magazinevoce.com.br/magazinerobson/air-fryer-philco-paf65a-preto-65l/p/240398500/ep/fryr/");
+  const produto = (id: string, extra = {}) => ({
+    id, variationId: id, title: `Produto ${id}`, available: true, ads: null, url: `/magazinein_3139904/produto-${id}/p/${id}/ep/fryr/`,
+    image: "https://a-static.mlcdn.com.br/{w}x{h}/produto/1.jpeg", category: { name: "Eletroportáteis" },
+    price: { bestPrice: "309.00", fullPrice: "399.00", price: "399.00", paymentMethodDescription: "no Pix" }, ...extra
+  });
+  const ctx = { props: { pageProps: { data: { search: { products: [produto("a1"), produto("b2", { available: false }), produto("c3", { ads: { id: 1 } }), produto("d4", { price: { bestPrice: "50.00", fullPrice: "50.00" } })] } } } } };
+  const offers = magaluOffersFromPage(`<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(ctx)}</script></html>`);
+  assert.deepEqual(offers.map(o => o.externalId), ["a1", "d4"], "fora de estoque e anúncio pago ficam de fora");
+  assert.equal(offers[0].priceCents, 30900);
+  assert.equal(offers[0].originalPriceCents, 39900);
+  assert.equal(offers[0].discountPercent, 23);
+  assert.equal(offers[0].imageUrl, "https://a-static.mlcdn.com.br/618x463/produto/1.jpeg");
+  assert.equal(offers[1].originalPriceCents, undefined, "sem preço cheio maior, não inventa desconto");
+  assert.equal(magaluOffersFromPage("<html>sem dados</html>").length, 0);
+  const vistos = new Set<string>();
+  for (let cursor = 0; cursor < MAGALU_CATEGORIES.length; cursor += 3) magaluSourcesFor(cursor).slice(1).forEach(path => vistos.add(path));
+  assert.equal(vistos.size, MAGALU_CATEGORIES.length, "o rodízio passa por todas as categorias");
+});

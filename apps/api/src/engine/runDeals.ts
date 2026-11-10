@@ -14,6 +14,7 @@ import { searchAliExpress } from "../deals/searchAliExpress";
 import { searchAwinPromotions } from "../deals/searchAwin";
 import { searchRakuten } from "../deals/searchRakuten";
 import { searchLomadee } from "../deals/searchLomadee";
+import { searchMagalu } from "../deals/searchMagalu";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
 import { newShortCode, publicBase, trackedUrl } from "../deals/trackedLink";
@@ -335,6 +336,9 @@ const fetchOffers = async (
     if (!secret.clientId || !secret.clientSecret || !pub.sid) throw new Error("Rakuten incompleta");
     return searchRakuten({ query, clientId: secret.clientId, clientSecret: secret.clientSecret, sid: pub.sid });
   }
+  if (marketplace === "magalu") {
+    return searchMagalu({ query, storeName: pub.storeName || secret.storeName, promoterId: pub.promoterId || secret.promoterId });
+  }
   if (marketplace === "epoca") {
     if (!secret.apiKey) throw new Error("Época precisa da chave Lomadee");
     return searchLomadee({ apiKey: secret.apiKey, brand: "epoca", marketplace: "epoca" });
@@ -455,7 +459,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       campaigns = campaigns.filter(item => item.marketplace !== "ml");
       if (stores.has("ml")) campaigns = [{ marketplace: "ml", query: "", min_discount: null, max_price_cents: null, priority: 0 }, ...campaigns];
     }
-    for (const id of ["shopee", "amazon", "aliexpress", "awin", "rakuten", "epoca", "samsung", "casasbahia", "natura", "paguemenos"]) {
+    for (const id of ["shopee", "amazon", "aliexpress", "magalu", "awin", "rakuten", "epoca", "samsung", "casasbahia", "natura", "paguemenos"]) {
       if (stores.has(id) && !campaigns.some(item => item.marketplace === id)) {
         campaigns.push({ marketplace: id, query: "", min_discount: null, max_price_cents: null, priority: 0 });
       }
