@@ -469,7 +469,7 @@ test("publicações: Status no formato curto, grupos no formato de sempre e pré
   assert.equal(shortTitle(offer.title), "AIR FRYER PHILCO 6,5L 1500W");
   const status = statusCaption(offer, "https://meli.la/abc").replace(/ /g, " ");
   assert.equal(status, [
-    "🔥 AIR FRYER PHILCO 6,5L 1500W 🔥", "",
+    "🔥 AIR FRYER PHILCO 6,5L 1500W (Mercado Livre) 🔥", "",
     "💰 De R$ 599,90 por R$ 349,90",
     "📉 42% OFF + FRETE GRÁTIS 🚚", "",
     "🛒 Garanta a sua aqui 👇", "https://meli.la/abc", "",
@@ -626,4 +626,12 @@ test("link rastreado: leva ao link de afiliado gravado e não conta robôs", asy
   assert.equal(countsAsClick("GET", "facebookexternalhit/1.1"), false);
   assert.equal(countsAsClick("GET", "TelegramBot (like TwitterBot)"), false);
   assert.equal(countsAsClick("GET", ""), false);
+});
+
+test("mensagem mostra de qual loja é a oferta", async () => {
+  const { statusCaption } = await import("../src/deals/messages");
+  const base = { externalId: "1", title: "Console PlayStation 5 Slim Digital", priceCents: 370323, url: "https://x", category: "" };
+  assert.match(statusCaption({ ...base, marketplace: "amazon" } as never, "https://a/go/1").split("\n")[0], /\(Amazon\)/);
+  assert.match(statusCaption({ ...base, marketplace: "aliexpress" } as never, "https://a/go/1").split("\n")[0], /\(AliExpress\)/);
+  assert.match(statusCaption({ ...base, marketplace: "ml" } as never, "https://a/go/1").split("\n")[0], /\(Mercado Livre\)/);
 });

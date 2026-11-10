@@ -53,7 +53,8 @@ export const STATUS_MAX_CHARS = 700;
 
 /** Texto curto do Status (formato aprovado pelo cliente): no máximo 10 linhas e 700 caracteres. */
 export const statusCaption = (offer: DealOffer, url: string) => {
-  const lines = [`🔥 ${shortTitle(offer.title)} 🔥`, ""];
+  // A loja vai junto do título ("... (Amazon)"): com o link do Achadinhos, o endereço não mostra mais de onde é.
+  const lines = [`🔥 ${shortTitle(offer.title)} (${marketplaceLabel(offer.marketplace)}) 🔥`, ""];
   if (offer.priceCents > 0) {
     lines.push(hasOldPrice(offer)
       ? `💰 De ${formatDealBRL(offer.originalPriceCents || 0)} por ${formatDealBRL(offer.priceCents)}`
