@@ -148,7 +148,7 @@ describe("fluxos legítimos (regressão)", () => {
     const me = await call("/api/me", { token: String(login.json.token) });
     assert.equal(me.status, 200);
     assert.equal((me.json.subscription as { status: string }).status, "trialing");
-    const save = await call("/api/stores/shopee", { method: "PUT", token: owner.token, body: { enabled: true, config: { appId: "123" }, secrets: { appId: "123", secret: "segredo-shopee" } } });
+    const save = await call("/api/stores/shopee", { method: "PUT", token: owner.token, body: { enabled: true, config: { appId: "18391610322" }, secrets: { appId: "18391610322", secret: "segredo-shopee" } } });
     assert.equal(save.status, 200);
     const stores = await call("/api/stores", { token: owner.token });
     const shopee = (stores.json.stores as Array<{ marketplace: string; secrets: Record<string, string>; hasSecrets: boolean }>).find(s => s.marketplace === "shopee")!;
@@ -322,7 +322,7 @@ describe("SEC-03 conta de leitura não lê credenciais", () => {
   test("member não recebe segredos das lojas nem o cookie do Mercado Livre", async () => {
     await ensureServer();
     const owner = await registerOwner();
-    await call("/api/stores/shopee", { method: "PUT", token: owner.token, body: { enabled: true, config: { appId: "1" }, secrets: { appId: "1", secret: "segredo-que-nao-pode-vazar" } } });
+    await call("/api/stores/shopee", { method: "PUT", token: owner.token, body: { enabled: true, config: { appId: "18391610323" }, secrets: { appId: "18391610323", secret: "segredo-que-nao-pode-vazar" } } });
     await call("/api/settings", { method: "PUT", token: owner.token, body: { mlCookie: "nsa_rotok=abc; ssid=cookie-que-nao-pode-vazar" } });
     const memberEmail = `leitura-${unique()}@test.local`;
     const created = await call("/api/team", { method: "POST", token: owner.token, body: { name: "Leitura", email: memberEmail, password: "senha-forte-123", role: "member" } });

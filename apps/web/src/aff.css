@@ -1106,11 +1106,15 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.aff-guide-card ul { display: flex; flex-wrap: nowrap; gap: 4px; height: 24px; margin: 0; padding: 0; list-style: none; overflow: hidden; }
+.aff-guide-card > ul { display: flex; flex-wrap: nowrap; gap: 4px; height: 24px; margin: 0; padding: 0; list-style: none; overflow: hidden; }
 /* Só a etiqueta de tempo (ul > li): sem o ">", a altura fixa de 24px valia também para os passos do guia aberto
    e os passos de várias linhas ficavam um por cima do outro. */
-.aff-guide-card ul > li { height: 24px; display: inline-flex; align-items: center; flex: 0 0 auto; padding: 0 6px; border-radius: 999px; background: #f8fafc; color: #475569; font-size: 11px; font-weight: 650; }
+.aff-guide-card > ul > li { height: 24px; display: inline-flex; align-items: center; flex: 0 0 auto; padding: 0 6px; border-radius: 999px; background: #f8fafc; color: #475569; font-size: 11px; font-weight: 650; }
 .aff-guide-card .aff-steps { gap: 8px; }
+/* Sub-itens de um passo (ex.: respostas de um formulário), no guia e na janela "Como conectar". */
+.aff-substeps { margin: 6px 0 2px; padding-left: 18px; list-style: disc; display: grid; gap: 4px; }
+.aff-guide-card .aff-substeps > li { height: auto; display: list-item; padding: 0; border-radius: 0; background: none; font-size: 13px; font-weight: 400; line-height: 1.45; }
+.aff-steps a, .aff-howto a, .aff-substeps a { color: #4f46e5; font-weight: 600; text-decoration: underline; overflow-wrap: anywhere; }
 .aff-guide-card .aff-steps > li { line-height: 1.45; overflow-wrap: anywhere; }
 .aff-guide-card > p {
   margin: 0;

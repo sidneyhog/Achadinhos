@@ -228,13 +228,13 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "15 min + até 3 dias úteis",
     portal: ["Abrir o portal de afiliados da Shopee", "https://affiliate.shopee.com.br"],
     steps: [
-      "Tenha o cadastro aprovado no programa de afiliados da Shopee (affiliate.shopee.com.br) e anote o seu ID de Afiliado: ele aparece no portal, no seu perfil, no canto superior direito.",
-      "No portal, abra o menu Abrir API. Se aparecer \"AppID: --\" e \"No momento você não possui acesso à Plataforma de Open API\", é preciso pedir a liberação à Shopee.",
-      "Para pedir: abra a Central de Ajuda do Afiliado (help.shopee.com.br/portal/10) e clique em Fale conosco por e-mail. Abre um formulário já logado na sua conta Shopee.",
-      "Preencha: \"Você já é Afiliado da Shopee?\" → Sim. \"Você está com problemas para efetuar o login…?\" → Não, estou com outras dificuldades / dúvidas. ID de Afiliado → o seu. Telefone → o mesmo cadastrado no programa de afiliados.",
-      "Em \"Selecione o tema\" escolha Tenho dúvidas/dificuldades com meu cadastro / conta. Em \"Selecione qual o cenário\" escolha Quero ativar a API. Clique em Enviar: a tela mostra \"Enviado com sucesso\".",
-      "A Shopee responde em até 3 dias úteis. Com o acesso liberado, a página Abrir API mostra o AppID e a Senha (se aparecer o botão Aplicar, clique nele).",
-      "Aqui no Achadinhos: cole o AppID em App ID e a Senha em Secret, marque Publicar esta loja e salve. Cada empresa usa a própria conta de afiliado, então o link sai com a sua comissão."
+      "Tenha o cadastro **aprovado** no programa de afiliados da Shopee: https://affiliate.shopee.com.br. Anote o seu **ID de Afiliado** (fica no seu perfil, no canto superior direito do portal).",
+      "No portal, abra o menu **Abrir API**. Se aparecer **AppID: --** e \"você não possui acesso\", siga os passos abaixo para pedir a liberação.",
+      "Abra a Central de Ajuda do Afiliado: https://help.shopee.com.br/portal/10 e clique em **Fale conosco por e-mail**. O formulário já abre logado na sua conta Shopee.",
+      "Responda o formulário assim:\n- Você já é Afiliado da Shopee? → **Sim**\n- Problemas para efetuar o login? → **Não, estou com outras dificuldades / dúvidas**\n- ID de Afiliado → **o seu ID**\n- Telefone → **o mesmo cadastrado no programa de afiliados**\n- Tema → **Tenho dúvidas/dificuldades com meu cadastro / conta**\n- Cenário → **Quero ativar a API**",
+      "Clique em **Enviar**. A tela mostra \"Enviado com sucesso\". A Shopee responde em **até 3 dias úteis**.",
+      "Depois de liberado, a página **Abrir API** mostra o **AppID** (só números) e a **Senha**. Se aparecer o botão Aplicar, clique nele.",
+      "Aqui no Achadinhos: cole o AppID em **App ID** e a Senha em **Secret**, marque **Publicar esta loja** e salve. Cada empresa usa a própria conta, então o link sai com a sua comissão."
     ]
   },
   aliexpress: {
@@ -357,6 +357,35 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
   }
 };
 
+/** Trecho de um passo: **negrito** e endereços https:// viram link que abre em outra aba. */
+function StepText({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|https?:\/\/[^\s)]+)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
+        if (/^https?:\/\//.test(part)) {
+          const url = part.replace(/[.,;:]+$/, "");
+          return <span key={index}><a href={url} target="_blank" rel="noopener noreferrer">{url.replace(/^https?:\/\//, "")}</a>{part.slice(url.length)}</span>;
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+/** Um passo do guia. Linhas seguintes que começam com "- " viram sub-itens (ex.: respostas de um formulário). */
+function StepItem({ step }: { step: string }) {
+  const [first, ...rest] = step.split("\n");
+  const items = rest.filter((line) => line.trim().startsWith("- ")).map((line) => line.trim().slice(2));
+  return (
+    <li>
+      <StepText text={first} />
+      {items.length ? <ul className="aff-substeps">{items.map((item) => <li key={item}><StepText text={item} /></li>)}</ul> : null}
+    </li>
+  );
+}
+
 /** Caixa "Como conectar" no topo da janela de cada loja. */
 function StoreHowTo({ id }: { id: string }) {
   const help = STORE_HELP[id];
@@ -368,7 +397,7 @@ function StoreHowTo({ id }: { id: string }) {
         <span className={`aff-howto__tag${help.auto ? " is-auto" : ""}`}>{help.auto ? "Publica sozinho" : "Só identifica a conta"}</span>
         <span className="aff-howto__time">{help.time}</span>
       </summary>
-      <ol>{help.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+      <ol>{help.steps.map((step) => <StepItem key={step} step={step} />)}</ol>
       {help.portal ? <a href={help.portal[1]} target="_blank" rel="noopener noreferrer">{help.portal[0]} ↗</a> : null}
     </details>
   );
@@ -2399,7 +2428,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                       <ul><li>{item[5]}</li></ul>
                       <p>{item[6]}</p>
                       {guide === item[0] && GUIDE_STEPS[item[0]] ? (
-                        <ol className="aff-steps">{GUIDE_STEPS[item[0]].map((step) => <li key={step}>{step}</li>)}</ol>
+                        <ol className="aff-steps">{GUIDE_STEPS[item[0]].map((step) => <StepItem key={step} step={step} />)}</ol>
                       ) : null}
                       {item[3] === "Em breve" ? null : (
                         <div className="aff-guide-card__actions">

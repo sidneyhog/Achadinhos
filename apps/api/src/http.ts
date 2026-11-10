@@ -1179,6 +1179,11 @@ app.put("/api/stores/:marketplace", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const marketplace = String(req.params.marketplace);
     if (!STORES.includes(marketplace)) return res.status(400).json({ error: "Loja desconhecida" });
+    // O AppID da Open API da Shopee é só número. Já apareceu link curto de produto (s.shopee.com.br/...) neste campo.
+    const shopeeAppId = String(req.body?.config?.appId || req.body?.secrets?.appId || "").trim();
+    if (marketplace === "shopee" && shopeeAppId && !/^\d{5,20}$/.test(shopeeAppId)) {
+      return res.status(400).json({ error: "O App ID da Shopee é só números (aparece em Abrir API no portal de afiliados). Link de produto não serve aqui." });
+    }
     if (!isLiveStore(marketplace)) return res.status(403).json({ error: "Esta loja chega em breve. Por enquanto, use Mercado Livre, Amazon, Shopee e Magalu." });
     const existing = await one<{ enabled: boolean; secrets_enc: string }>("SELECT enabled, secrets_enc FROM stores WHERE company_id = $1 AND marketplace = $2", [companyId, marketplace]);
     const enabling = req.body?.enabled === true && !existing?.enabled;
