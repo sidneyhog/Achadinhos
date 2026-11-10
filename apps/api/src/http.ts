@@ -17,7 +17,8 @@ import { createOfficialMlLink, mercadoLivreCookieExpiry, reportMlLink, stripMlTr
 import { marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
-import { clampStatusPace } from "./deals/statusPolicy";
+import { clampStatusPace, STATUS_JID } from "./deals/statusPolicy";
+import { DAY_START, readPostFilter } from "./deals/postFilter";
 import { countsAsClick, isClickToken, redirectTarget } from "./deals/trackedLink";
 import { channelList } from "./deals/telegramSources";
 import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
@@ -910,16 +911,35 @@ app.post("/api/admin/password", auth, admin, async (req, res) => {
 app.get("/api/dashboard", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
-    const [today] = await q<{ posts: string; clicks: string }>(
-      `SELECT count(*)::text AS posts, coalesce(sum(click_count),0)::text AS clicks FROM posts WHERE company_id = $1 AND status = 'sent' AND created_at >= date_trunc('day', now())`,
+    // "Hoje" no fuso de São Paulo. Cliques vêm de post_clicks (um registro por clique, com a hora).
+    const [today] = await q<{ posts: string; errors: string; found: string; clicks: string }>(
+      `SELECT
+         (SELECT count(*) FROM posts WHERE company_id = $1 AND status = 'sent' AND created_at >= ${DAY_START})::text AS posts,
+         (SELECT count(*) FROM posts WHERE company_id = $1 AND status = 'error' AND created_at >= ${DAY_START})::text AS errors,
+         (SELECT count(*) FROM offers WHERE company_id = $1 AND found_at >= ${DAY_START})::text AS found,
+         (SELECT count(*) FROM post_clicks WHERE company_id = $1 AND clicked_at >= ${DAY_START})::text AS clicks`,
       [companyId]
     );
-    const bestStore = await one<{ marketplace: string; total: string }>(
-      "SELECT marketplace, count(*)::text AS total FROM posts WHERE company_id = $1 AND status = 'sent' GROUP BY marketplace ORDER BY count(*) DESC LIMIT 1",
+    // Melhores dos últimos 7 dias por cliques (empate: mais publicações).
+    const bestStore = await one<{ marketplace: string; total: string; clicks: string }>(
+      `SELECT p.marketplace, count(DISTINCT p.id)::text AS total, count(c.id)::text AS clicks
+       FROM posts p LEFT JOIN post_clicks c ON c.post_id = p.id AND c.clicked_at >= now() - interval '7 days'
+       WHERE p.company_id = $1 AND p.status = 'sent' AND p.created_at >= now() - interval '7 days'
+       GROUP BY p.marketplace ORDER BY count(c.id) DESC, count(DISTINCT p.id) DESC LIMIT 1`,
       [companyId]
     );
-    const bestGroup = await one<{ group_name: string; total: string }>(
-      "SELECT group_name, count(*)::text AS total FROM posts WHERE company_id = $1 AND status = 'sent' AND group_name <> '' GROUP BY group_name ORDER BY count(*) DESC LIMIT 1",
+    const bestGroup = await one<{ group_name: string; group_jid: string; total: string; clicks: string }>(
+      `SELECT p.group_name, p.group_jid, count(DISTINCT p.id)::text AS total, count(c.id)::text AS clicks
+       FROM posts p LEFT JOIN post_clicks c ON c.post_id = p.id AND c.clicked_at >= now() - interval '7 days'
+       WHERE p.company_id = $1 AND p.status = 'sent' AND p.group_name <> '' AND p.created_at >= now() - interval '7 days'
+       GROUP BY p.group_name, p.group_jid ORDER BY count(c.id) DESC, count(DISTINCT p.id) DESC LIMIT 1`,
+      [companyId]
+    );
+    const topOffer = await one<{ id: number; title: string; marketplace: string; clicks: string }>(
+      `SELECT p.id, p.title, p.marketplace, count(c.id)::text AS clicks
+       FROM post_clicks c JOIN posts p ON p.id = c.post_id
+       WHERE c.company_id = $1 AND c.clicked_at >= now() - interval '7 days'
+       GROUP BY p.id ORDER BY count(c.id) DESC LIMIT 1`,
       [companyId]
     );
     const bestCampaign = await one<{ query: string; marketplace: string }>(
@@ -929,7 +949,7 @@ app.get("/api/dashboard", auth, async (req, res, next) => {
     const setting = await one("SELECT enabled, last_run_at, last_error, posts_per_cycle, interval_seconds FROM settings WHERE company_id = $1", [companyId]);
     const recent = await q("SELECT id, title, marketplace, price_cents, status, created_at, click_count FROM posts WHERE company_id = $1 ORDER BY id DESC LIMIT 8", [companyId]);
     const company = await one<{ tenant_id: string }>("SELECT tenant_id FROM companies WHERE id = $1", [companyId]);
-    res.json({ today, bestStore, bestGroup, bestCampaign, setting, recent, tenantId: company?.tenant_id });
+    res.json({ today, bestStore, bestGroup, bestCampaign, topOffer, setting, recent, tenantId: company?.tenant_id });
   } catch (err) {
     next(err);
   }
@@ -1271,6 +1291,60 @@ app.get("/api/posts", auth, async (req, res, next) => {
       [companyIdOf(req), status]
     );
     res.json({ posts: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Publicações com filtros (tela Publicações e cartões do painel). by=posts filtra pela data da publicação;
+// by=clicks traz o que recebeu cliques no período, do mais clicado para o menos.
+app.get("/api/posts/search", auth, async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    const filter = readPostFilter(req.query as Record<string, unknown>);
+    const params: unknown[] = [companyId];
+    const where = ["p.company_id = $1"];
+    const add = (sql: string, value: unknown) => {
+      params.push(value);
+      where.push(sql.replace("?", `$${params.length}`));
+    };
+    if (filter.status) add("p.status = ?", filter.status);
+    if (filter.store) add("p.marketplace = ?", filter.store);
+    if (filter.dest === "status") where.push(`p.group_jid = '${STATUS_JID}'`);
+    else if (filter.dest === "telegram") where.push("p.group_jid LIKE 'telegram:%'");
+    else if (filter.dest) add("p.group_jid = ?", filter.dest);
+    if (filter.q) add("p.title ILIKE ?", `%${filter.q}%`);
+    const since = filter.period === "all" ? "'-infinity'::timestamptz" : filter.period === "today" ? DAY_START : `now() - interval '${filter.period === "7d" ? 7 : 30} days'`;
+    const clickJoin = `LEFT JOIN post_clicks c ON c.post_id = p.id AND c.clicked_at >= ${since}`;
+    if (filter.by === "clicks") where.push(`EXISTS (SELECT 1 FROM post_clicks k WHERE k.post_id = p.id AND k.clicked_at >= ${since})`);
+    else where.push(`p.created_at >= ${since}`);
+    const order = filter.by === "clicks" || filter.sort === "clicks" ? "clicks DESC, p.id DESC" : "p.id DESC";
+    const rows = await q(
+      `SELECT p.id, p.created_at, p.title, p.marketplace, p.price_cents, p.url, p.image_url, p.group_name, p.group_jid, p.status, p.error,
+              p.click_count, count(c.id)::int AS clicks
+       FROM posts p ${clickJoin} WHERE ${where.join(" AND ")}
+       GROUP BY p.id ORDER BY ${order} LIMIT 300`,
+      params
+    );
+    const [summary] = await q<{ posts: number; sent: number; errors: number; clicks: number }>(
+      `SELECT count(*)::int AS posts, count(*) FILTER (WHERE status = 'sent')::int AS sent, count(*) FILTER (WHERE status = 'error')::int AS errors,
+              coalesce(sum(clicks), 0)::int AS clicks
+       FROM (SELECT p.id, p.status, count(c.id) AS clicks FROM posts p ${clickJoin} WHERE ${where.join(" AND ")} GROUP BY p.id) t`,
+      params
+    );
+    const byStore = await q(
+      `SELECT marketplace, count(*)::int AS posts, coalesce(sum(clicks), 0)::int AS clicks
+       FROM (SELECT p.id, p.marketplace, count(c.id) AS clicks FROM posts p ${clickJoin} WHERE ${where.join(" AND ")} GROUP BY p.id) t
+       GROUP BY marketplace ORDER BY clicks DESC, posts DESC`,
+      params
+    );
+    const byDest = await q(
+      `SELECT group_jid, max(group_name) AS group_name, count(*)::int AS posts, coalesce(sum(clicks), 0)::int AS clicks
+       FROM (SELECT p.id, p.group_jid, p.group_name, count(c.id) AS clicks FROM posts p ${clickJoin} WHERE ${where.join(" AND ")} GROUP BY p.id) t
+       GROUP BY group_jid ORDER BY clicks DESC, posts DESC LIMIT 30`,
+      params
+    );
+    res.json({ filter, posts: rows, summary, byStore, byDest });
   } catch (err) {
     next(err);
   }
@@ -2375,8 +2449,9 @@ app.get("/go/:token", async (req, res) => {
   if (!isClickToken(token)) return res.status(404).send("Oferta não encontrada");
   const counted = countsAsClick(req.method, String(req.headers["user-agent"] || ""));
   const row = counted
-    ? await one<{ url: string }>("UPDATE posts SET click_count = click_count + 1 WHERE click_token = $1 AND status = 'sent' RETURNING url", [token])
-    : await one<{ url: string }>("SELECT url FROM posts WHERE click_token = $1 AND status = 'sent'", [token]);
+    ? await one<{ id: number; company_id: number; url: string }>("UPDATE posts SET click_count = click_count + 1 WHERE click_token = $1 AND status = 'sent' RETURNING id, company_id, url", [token])
+    : await one<{ id: number; company_id: number; url: string }>("SELECT id, company_id, url FROM posts WHERE click_token = $1 AND status = 'sent'", [token]);
+  if (counted && row) await q("INSERT INTO post_clicks (post_id, company_id) VALUES ($1, $2)", [row.id, row.company_id]).catch(() => undefined);
   const target = redirectTarget(row?.url);
   if (!target) return res.status(404).send("Oferta não encontrada");
   res.set("Cache-Control", "no-store");

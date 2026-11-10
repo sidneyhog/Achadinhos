@@ -6,6 +6,7 @@ import { Mark } from "./Mark";
 import { StatusTab } from "./StatusTab";
 import { BillingView } from "./BillingView";
 import { go, PANEL_PATH, usePath } from "./route";
+import { destOf, filterHref, PostsView, type PostFilter } from "./PostsView";
 
 const STORES = [
   { id: "ml", label: "Mercado Livre", logo: "ml.svg" },
@@ -832,6 +833,14 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
   const path = usePath();
   const view: View = path.startsWith("/configuracoes") ? "config" : (Object.entries(PANEL_PATH).find(([, href]) => href === path || path.startsWith(`${href}/`))?.[0] as View) || "dash";
   const setView = (id: View) => go(id === "config" ? "/configuracoes/envio" : PANEL_PATH[id]);
+  // Filtros da tela Publicações ficam no endereço (?period=today&by=clicks): os cartões do painel abrem a lista já filtrada.
+  const [search, setSearch] = useState(() => window.location.search);
+  useEffect(() => {
+    const sync = () => setSearch(window.location.search);
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+  const openPosts = (filter: Partial<PostFilter>) => go(filterHref(PANEL_PATH.posts, filter));
   const configTab = path.split("/")[2] && ["geral", "envio", "filtros", "horarios", "equipe", "logs"].includes(path.split("/")[2]) ? path.split("/")[2] : "envio";
   const setConfigTab = (id: string) => go(`/configuracoes/${id}`);
   const connMatch = path.match(/^\/conexoes\/(\d+)\/(conexao|lojas|grupos|status)$/);
@@ -1374,22 +1383,33 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                 </article>
               </section>
               <section className="aff-metrics">
-                {[
-                  ["Encontradas hoje", offers.length, "produtos analisados"],
-                  ["Aprovadas hoje", dash?.today?.posts || 0, "nesta conta"],
-                  ["Publicadas", posts.filter((post) => post.status === "sent").length, "nesta tela"],
-                  ["Cliques", posts.reduce((sum, post) => sum + Number(post.click_count || 0), 0), "no período"]
-                ].map(([label, value, hint]) => (
-                  <article key={String(label)}><span>{label}</span><strong>{value}</strong><small>{hint}</small></article>
+                {([
+                  ["Encontradas hoje", dash?.today?.found, "produtos analisados · ver ofertas", () => setView("offers")],
+                  ["Publicadas hoje", dash?.today?.posts, "ver o que saiu hoje", () => openPosts({ period: "today", status: "sent" })],
+                  ["Cliques hoje", dash?.today?.clicks, "ver quais ofertas foram clicadas", () => openPosts({ period: "today", by: "clicks" })],
+                  ["Erros hoje", dash?.today?.errors, Number(dash?.today?.errors || 0) ? "ver o que falhou" : "nenhuma falha", () => openPosts({ period: "today", status: "error" })]
+                ] as Array<[string, unknown, string, () => void]>).map(([label, value, hint, open]) => (
+                  <button key={label} type="button" className="aff-metric" onClick={open}><span>{label}</span><strong>{Number(value || 0).toLocaleString("pt-BR")}</strong><small>{hint}</small></button>
                 ))}
               </section>
               <section className="aff-highlights">
-                <article><span>Melhor loja</span><strong>{STORES.find((item) => item.id === dash?.bestStore?.marketplace)?.label || "—"}</strong><small>{dash?.bestStore?.total || 0} publicações</small></article>
-                <article><span>Melhor campanha</span><strong>{dash?.bestCampaign?.query || "—"}</strong><small>{dash?.bestCampaign?.marketplace || ""}</small></article>
-                <article><span>Melhor grupo</span><strong>{dash?.bestGroup?.group_name || "—"}</strong><small>{dash?.bestGroup?.total || 0} cliques</small></article>
+                <button type="button" className="aff-metric" disabled={!dash?.bestStore} onClick={() => openPosts({ period: "7d", store: dash?.bestStore?.marketplace, sort: "clicks" })}>
+                  <span>Melhor loja · 7 dias</span><strong>{STORES.find((item) => item.id === dash?.bestStore?.marketplace)?.label || "—"}</strong>
+                  <small>{dash?.bestStore ? `${dash.bestStore.clicks} cliques · ${dash.bestStore.total} publicações` : "sem publicações"}</small>
+                </button>
+                <button type="button" className="aff-metric" disabled={!dash?.topOffer} onClick={() => openPosts({ period: "7d", by: "clicks", q: String(dash?.topOffer?.title || "").slice(0, 40) })}>
+                  <span>Oferta mais clicada · 7 dias</span><strong>{dash?.topOffer?.title || "—"}</strong>
+                  <small>{dash?.topOffer ? `${dash.topOffer.clicks} cliques · ${STORES.find((item) => item.id === dash.topOffer.marketplace)?.label || ""}` : "nenhum clique ainda"}</small>
+                </button>
+                <button type="button" className="aff-metric" disabled={!dash?.bestGroup} onClick={() => openPosts({ period: "7d", dest: destOf(dash?.bestGroup?.group_jid || ""), sort: "clicks" })}>
+                  <span>Melhor destino · 7 dias</span><strong>{dash?.bestGroup?.group_name || "—"}</strong>
+                  <small>{dash?.bestGroup ? `${dash.bestGroup.clicks} cliques · ${dash.bestGroup.total} publicações` : "sem publicações"}</small>
+                </button>
               </section>
             </>
           )}
+
+          {view === "posts" && <PostsView search={search} stores={STORES} onFilter={openPosts} />}
 
           {view === "stores" && (
             <section className="aff-block">

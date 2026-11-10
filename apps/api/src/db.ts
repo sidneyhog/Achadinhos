@@ -56,6 +56,16 @@ export const migrate = async () => {
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS posts_per_cycle INTEGER;
     ALTER TABLE settings ADD COLUMN IF NOT EXISTS tracked_links BOOLEAN NOT NULL DEFAULT TRUE;
     CREATE INDEX IF NOT EXISTS posts_click_token ON posts (click_token);
+    -- Um registro por clique contado: dá para saber cliques de hoje, da semana e de cada publicação no período.
+    CREATE TABLE IF NOT EXISTS post_clicks (
+      id BIGSERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      company_id INTEGER NOT NULL,
+      clicked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS post_clicks_company_time ON post_clicks (company_id, clicked_at DESC);
+    CREATE INDEX IF NOT EXISTS post_clicks_post ON post_clicks (post_id);
+    CREATE INDEX IF NOT EXISTS posts_company_status_created ON posts (company_id, status, created_at DESC);
     ALTER TABLE settings ADD COLUMN IF NOT EXISTS ext_key_hash TEXT NOT NULL DEFAULT '';
     ALTER TABLE settings ADD COLUMN IF NOT EXISTS ml_cookie_synced_at TIMESTAMPTZ;
     ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS status_enabled BOOLEAN NOT NULL DEFAULT FALSE;

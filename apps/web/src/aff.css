@@ -1698,3 +1698,50 @@ button.land-brand { background: none; border: 0; padding: 0; cursor: pointer; fo
   white-space: nowrap;
   flex: 0 0 auto;
 }
+
+/* Números clicáveis do painel e da tela Publicações. */
+.aff-metric { all: unset; box-sizing: border-box; display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px; cursor: pointer; background: var(--card, #fff); border: 1px solid var(--line, #e2e8f0); min-width: 0; transition: border-color .15s, box-shadow .15s; }
+.aff-highlights .aff-metric { padding: 16px; gap: 4px; }
+.aff-metric span { font-size: 11px; color: var(--muted); font-weight: 650; }
+.aff-metric strong { font-size: 22px; letter-spacing: -0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aff-highlights .aff-metric strong { font-size: 16px; letter-spacing: 0; }
+.aff-metric small { color: var(--muted); }
+.aff-metric:hover:not(:disabled), .aff-metric:focus-visible { border-color: #6d28d9; box-shadow: 0 0 0 3px rgba(109, 40, 217, .12); }
+.aff-metric:hover:not(:disabled) small { color: #6d28d9; }
+.aff-metric:disabled { cursor: default; opacity: .7; }
+.aff-metric.is-on { border-color: #6d28d9; background: rgba(109, 40, 217, .06); }
+.aff-posts { display: grid; gap: 14px; }
+.aff-posts__head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.aff-posts__head p { margin: 4px 0 0; color: var(--muted); }
+.aff-posts__sum { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.aff-posts__bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.aff-posts__bar form { flex: 1 1 240px; }
+.aff-posts__bar input { width: 100%; box-sizing: border-box; height: 38px; padding: 0 12px; border: 1px solid var(--line, #e2e8f0); border-radius: 10px; font: inherit; }
+.aff-posts__chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.aff-posts__chips button { border: 0; border-radius: 999px; padding: 6px 12px; background: rgba(109, 40, 217, .1); color: #5b21b6; font: inherit; font-size: 13px; cursor: pointer; }
+.aff-posts__chips button.is-clear { background: transparent; color: var(--muted); text-decoration: underline; }
+.aff-posts__split { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; align-items: start; }
+.aff-posts__split aside { display: grid; gap: 6px; }
+.aff-posts__split aside h3 { margin: 8px 0 2px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.aff-posts__split aside button { all: unset; box-sizing: border-box; display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+.aff-posts__split aside button:hover { background: rgba(109, 40, 217, .06); }
+.aff-posts__split aside button.is-on { border-color: #6d28d9; background: rgba(109, 40, 217, .08); }
+.aff-posts__split aside span { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aff-posts__split aside small { color: var(--muted); }
+.aff-posts__list { display: grid; gap: 8px; min-width: 0; }
+.aff-posts__list article { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line, #e2e8f0); border-radius: 12px; background: var(--card, #fff); }
+.aff-posts__list article.is-error { border-color: #fecaca; }
+.aff-posts__list img { width: 56px; height: 56px; object-fit: contain; border-radius: 8px; background: #f8fafc; }
+.aff-posts__list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aff-posts__list p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.aff-posts__clicks { display: grid; justify-items: end; gap: 2px; text-align: right; }
+.aff-posts__clicks b { font-size: 20px; }
+.aff-posts__clicks small { color: var(--muted); font-size: 12px; }
+.aff-posts__clicks a { font-size: 13px; color: #6d28d9; }
+@media (max-width: 860px) {
+  .aff-posts__sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aff-posts__split { grid-template-columns: 1fr; }
+  .aff-posts__list article { grid-template-columns: 44px minmax(0, 1fr); }
+  .aff-posts__list img { width: 44px; height: 44px; }
+  .aff-posts__clicks { grid-column: 1 / -1; justify-items: start; text-align: left; grid-auto-flow: column; justify-content: start; align-items: baseline; gap: 8px; }
+}

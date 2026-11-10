@@ -720,3 +720,14 @@ test("Fontes da Amazon: oferta da fila central sai com a tag da empresa, não a 
   assert.equal(offer.url, "https://www.amazon.com.br/dp/B0CP31L73X?tag=robson-20");
   assert.equal(offer.discountPercent, 18);
 });
+
+test("filtros da tela Publicações: só aceitam valores conhecidos", async () => {
+  const { readPostFilter } = await import("../src/deals/postFilter");
+  assert.deepEqual(readPostFilter({}), { by: "posts", period: "7d", store: "", dest: "", status: "", q: "", sort: "recent" });
+  const f = readPostFilter({ by: "clicks", period: "today", store: "ml", dest: "120363410717498464@g.us", status: "error", q: "air fryer 100%", sort: "clicks" });
+  assert.deepEqual(f, { by: "clicks", period: "today", store: "ml", dest: "120363410717498464@g.us", status: "error", q: "air fryer 100 ", sort: "clicks" });
+  const ruim = readPostFilter({ by: "x", period: "1 day; drop", store: "loja'", dest: "x' or 1=1", status: "x" });
+  assert.deepEqual([ruim.by, ruim.period, ruim.store, ruim.dest, ruim.status], ["posts", "7d", "", "", ""], "valor estranho vira o padrão");
+  assert.equal(readPostFilter({ dest: "status" }).dest, "status");
+  assert.equal(readPostFilter({ dest: "telegram" }).dest, "telegram");
+});
