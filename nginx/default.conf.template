@@ -42,6 +42,12 @@ server {
     proxy_set_header X-Real-IP $remote_addr;
   }
 
+  # Link curto de oferta: /aB3x9Kp (7 caracteres com pelo menos um número) vai para /go/aB3x9Kp na API.
+  location ~ "^/(?=[A-Za-z]*[0-9])([0-9A-Za-z]{7})$" {
+    proxy_pass $api_upstream/go/$1;
+    proxy_set_header X-Real-IP $remote_addr;
+  }
+
   location / {
     root /usr/share/nginx/html;
     try_files $uri $uri/ /index.html;

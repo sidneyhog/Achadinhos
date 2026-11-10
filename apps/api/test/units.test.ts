@@ -635,3 +635,22 @@ test("mensagem mostra de qual loja é a oferta", async () => {
   assert.match(statusCaption({ ...base, marketplace: "aliexpress" } as never, "https://a/go/1").split("\n")[0], /\(AliExpress\)/);
   assert.match(statusCaption({ ...base, marketplace: "ml" } as never, "https://a/go/1").split("\n")[0], /\(Mercado Livre\)/);
 });
+
+test("link curto: código de 7 caracteres na raiz, sem bater com páginas do painel", async () => {
+  const crypto = await import("node:crypto");
+  const { newShortCode, isShortCode, isClickToken, trackedUrl, SHORT_CODE_LENGTH } = await import("../src/deals/trackedLink");
+  const codes = new Set<string>();
+  for (let i = 0; i < 2000; i += 1) {
+    const code = newShortCode(size => crypto.randomBytes(size));
+    assert.equal(code.length, SHORT_CODE_LENGTH);
+    assert.ok(isShortCode(code), code);
+    codes.add(code);
+  }
+  assert.equal(codes.size, 2000, "2000 sorteios sem repetir");
+  assert.equal(isShortCode("vitrine"), false, "páginas só com letras nunca viram código");
+  assert.equal(isShortCode("cadastro"), false);
+  assert.equal(isClickToken("43c9cfef9360e53a"), true, "links antigos continuam funcionando");
+  assert.equal(isClickToken("../etc1"), false);
+  assert.equal(trackedUrl("https://l.exemplo.com", "aB3x9Kp"), "https://l.exemplo.com/aB3x9Kp");
+  assert.equal(trackedUrl("https://l.exemplo.com", "43c9cfef9360e53a"), "https://l.exemplo.com/go/43c9cfef9360e53a");
+});

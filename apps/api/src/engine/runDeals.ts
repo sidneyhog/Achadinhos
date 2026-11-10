@@ -16,7 +16,7 @@ import { searchRakuten } from "../deals/searchRakuten";
 import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
-import { publicBase, trackedUrl } from "../deals/trackedLink";
+import { newShortCode, publicBase, trackedUrl } from "../deals/trackedLink";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
 import { TYPE_GAP, URGENT_BONUS, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
 import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
@@ -349,6 +349,15 @@ const subscriptionOpen = (row: { status: string; company_status: string; trial_e
   return false;
 };
 
+/** Código curto do link de clique, sem repetir um que já exista. */
+const newClickToken = async () => {
+  for (;;) {
+    const code = newShortCode(size => crypto.randomBytes(size));
+    const [taken] = await q("SELECT 1 FROM posts WHERE click_token = $1 LIMIT 1", [code]);
+    if (!taken) return code;
+  }
+};
+
 type CompanyRow = {
   id: number;
   company_status: string;
@@ -408,8 +417,8 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
     if (!current?.enabled) return;
     // Link rastreado: a mensagem leva <endereço do painel>/go/<token>, que conta o clique e redireciona
     // para o link de afiliado gravado na publicação. Sem endereço público configurado, vai o link direto.
-    const [platform] = await q<{ public_url: string }>("SELECT public_url FROM platform_settings WHERE id = 1");
-    const linkBase = current.tracked_links === false ? "" : publicBase(platform?.public_url || "");
+    const [platform] = await q<{ public_url: string; short_url: string }>("SELECT public_url, short_url FROM platform_settings WHERE id = 1");
+    const linkBase = current.tracked_links === false ? "" : publicBase(platform?.short_url || platform?.public_url || "");
     const linkFor = (token: string, direct: string) => (linkBase ? trackedUrl(linkBase, token) : direct);
     if (!insideSchedule({ hourStart: current.hour_start, hourEnd: current.hour_end, allowedDays: current.allowed_days })) {
       await q("UPDATE settings SET last_error = $2, updated_at = now() WHERE company_id = $1", [company.id, "Fora do horário ou do dia permitido"]);
@@ -764,7 +773,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
               [company.id, group.group_jid, offer.marketplace, offer.externalId, published, titleKey(offer.title)]
             );
             if (since.length) continue;
-            const token = crypto.randomBytes(8).toString("hex");
+            const token = await newClickToken();
             try {
               // Só texto: a imagem chega pelo cartão de prévia do link e não pesa o celular de quem está no grupo.
               await sendTextWithPreview(pub.id, group.group_jid, caption(offer, linkFor(token, published)), await previewOf());
@@ -817,7 +826,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             if (!pub.recipients.length) throw new Error("ninguém para ver: ative um grupo nesta conexão ou traga contatos para a Base");
             // Status só de texto (formato curto); a foto do produto aparece no cartão de prévia do link.
             const preview = await previewOf();
-            const statusToken = crypto.randomBytes(8).toString("hex");
+            const statusToken = await newClickToken();
             const send = (to: string[]) => sendStatus(pub.id, to, null, statusCaption(offer, linkFor(statusToken, published)), preview);
             try {
               await send(pub.recipients);
@@ -861,7 +870,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
                 [company.id, jid, offer.externalId, titleKey(offer.title)]
               );
               if (dup.length) continue;
-              const click = crypto.randomBytes(8).toString("hex");
+              const click = await newClickToken();
               try {
                 const text = caption(offer, linkFor(click, published));
                 if (offer.imageUrl) {

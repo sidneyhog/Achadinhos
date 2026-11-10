@@ -18,7 +18,7 @@ import { marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace } from "./deals/statusPolicy";
-import { countsAsClick, redirectTarget } from "./deals/trackedLink";
+import { countsAsClick, isClickToken, redirectTarget } from "./deals/trackedLink";
 import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
 import { AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, amazonQueueOffer, readAmazonItem } from "./deals/amazonExtension";
 import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
@@ -2359,7 +2359,7 @@ app.get("/vitrine/:tenantId", async (req, res) => {
 // Clique no link rastreado: conta (menos robôs e pré-visualizações) e leva ao link de afiliado gravado na publicação.
 app.get("/go/:token", async (req, res) => {
   const token = String(req.params.token || "");
-  if (!/^[0-9a-f]{16}$/.test(token)) return res.status(404).send("Oferta não encontrada");
+  if (!isClickToken(token)) return res.status(404).send("Oferta não encontrada");
   const counted = countsAsClick(req.method, String(req.headers["user-agent"] || ""));
   const row = counted
     ? await one<{ url: string }>("UPDATE posts SET click_count = click_count + 1 WHERE click_token = $1 AND status = 'sent' RETURNING url", [token])

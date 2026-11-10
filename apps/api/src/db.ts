@@ -94,6 +94,7 @@ export const migrate = async () => {
     ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS pagbank_token_enc TEXT NOT NULL DEFAULT '';
     ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS pagbank_sandbox BOOLEAN NOT NULL DEFAULT TRUE;
     ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS public_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS short_url TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS wa_address_book (
       whatsapp_id INTEGER NOT NULL,
       jid TEXT NOT NULL,
