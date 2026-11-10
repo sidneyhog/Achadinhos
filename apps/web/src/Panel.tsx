@@ -215,12 +215,13 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "10 min",
     portal: ["Abrir o gerador de links do ML", "https://www.mercadolivre.com.br/afiliados/linkbuilder"],
     steps: [
-      "No gerador de links do Mercado Livre, gere um link de afiliado de qualquer produto e copie.",
-      "Cole em Colar um link para preencher, aqui embaixo. Conta e Matt Tool se preenchem sozinhos.",
-      "Baixe a extensão na página Automação e instale no Chrome ou no Edge.",
-      "Logado no Mercado Livre, clique na extensão e em Copiar cookie. Cole em Cookie do gerador.",
-      "Deixe Gerar link oficial marcado e clique em Testar link oficial. Deu certo se aparecer um link meli.la.",
-      "O cookie vale cerca de 30 dias. O painel avisa 2 dias antes: é só copiar e colar de novo."
+      "Tenha conta no **Programa de Afiliados do Mercado Livre** e abra o gerador de links: https://www.mercadolivre.com.br/afiliados/linkbuilder",
+      "Gere um link de afiliado de **qualquer produto** e copie.",
+      "Aqui, cole o link em **Colar um link para preencher**. Os campos se preenchem sozinhos:\n- Conta → **o seu matt_word**\n- Matt Tool → **o número do matt_tool**\n- Etiqueta → **pode ficar vazia** (o robô usa a Conta)",
+      "Instale a extensão do Achadinhos: página **Automação → Baixar extensão**, no Chrome ou no Edge.",
+      "Mande o cookie do Mercado Livre de um destes jeitos:\n- **Automático (recomendado):** em **Automação**, clique em **Gerar código**, cole o código na extensão em **Envio automático** e clique em **Ligar**. Ela renova o cookie sozinha.\n- **Manual:** logado no Mercado Livre, clique na extensão e em **Copiar cookie**, e cole em **Cookie do gerador**.",
+      "Deixe **Gerar link oficial** marcado e clique em **Testar link oficial**. Deu certo se aparecer um link **meli.la**.",
+      "No modo manual, o cookie vale cerca de **30 dias** e o painel avisa 2 dias antes: é só copiar e colar de novo."
     ]
   },
   shopee: {
@@ -252,10 +253,11 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "5 min",
     portal: ["Abrir o Amazon Associados", "https://associados.amazon.com.br"],
     steps: [
-      "No Amazon Associados, copie a sua Partner Tag (termina em -20). Também pode colar um link seu com tag=.",
-      "Cole a tag aqui, ative a Amazon e salve. Pronto: o robô publica sozinho as promoções da Amazon que o Achadinhos acompanha o dia todo, sempre com a sua tag. Não precisa de PC nem de celular.",
-      "Opcional: com a extensão do Achadinhos (página Automação), clique em Enviar ao Achadinhos na página de um produto da Amazon para escolher produtos você mesmo. Eles entram na frente da fila por 24 h.",
-      "Também dá para colar em Links dos produtos, um por linha: link | nome | preço (link da página ou o curto amzn.to da SiteStripe)."
+      "Tenha conta no **Amazon Associados**: https://associados.amazon.com.br",
+      "Copie a sua **Partner Tag** (termina em **-20**, ex.: suaconta-20). Também serve colar um link seu com tag=.",
+      "Aqui, cole a tag, marque **Publicar esta loja** e salve. Pronto: o robô publica sozinho as promoções da Amazon que o Achadinhos acompanha o dia todo, sempre com a sua tag. Não precisa de PC nem de celular.",
+      "Opcional, para escolher produtos você mesmo:\n- **Pela extensão:** com a extensão do Achadinhos (página **Automação**), abra a página de um produto da Amazon e clique em **Enviar ao Achadinhos**. Ele entra na frente da fila por **24 h**.\n- **Colando links:** em **Links dos produtos**, um por linha: **link | nome | preço** (link da página ou o curto **amzn.to** da SiteStripe).",
+      "Atenção: a Amazon cancela o cadastro de associado se nenhum link seu gerar um pedido em **180 dias**."
     ]
   },
   awin: {
@@ -341,9 +343,10 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "5 min",
     portal: ["Abrir o Parceiro Magalu", "https://www.magazinevoce.com.br"],
     steps: [
-      "Abra a sua loja no Parceiro Magalu e copie o endereço dela (ex.: magazinevoce.com.br/magazinein_3139904).",
-      "Cole o endereço (ou só o nome da loja) e o seu Promoter Id aqui e salve.",
-      "O robô busca as ofertas da Magalu sozinho, por categoria e pelas palavras das suas campanhas, e publica com o link da sua loja."
+      "Tenha a sua loja no **Parceiro Magalu**: https://www.magazinevoce.com.br",
+      "Abra a sua loja e copie o endereço dela, ex.: **magazinevoce.com.br/magazinein_3139904**.",
+      "Aqui, preencha:\n- Nome da loja → **o endereço copiado** (ou só o nome da loja)\n- Promoter Id → **o seu código de promotor do Parceiro Magalu**",
+      "Marque **Publicar esta loja** e salve. O robô busca as ofertas da Magalu sozinho, por categoria e pelas palavras das suas campanhas, e publica com o link da sua loja."
     ]
   },
   terabyte: {
