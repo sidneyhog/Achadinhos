@@ -18,6 +18,7 @@ import { marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace } from "./deals/statusPolicy";
+import { countsAsClick, redirectTarget } from "./deals/trackedLink";
 import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
 import { AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, amazonQueueOffer, readAmazonItem } from "./deals/amazonExtension";
 import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
@@ -1048,6 +1049,7 @@ app.put("/api/settings", auth, async (req, res, next) => {
     if ("mlMattTool" in body) set("ml_matt_tool", body.mlMattTool == null ? "" : String(body.mlMattTool));
     if ("mlMattWord" in body) set("ml_matt_word", body.mlMattWord == null ? "" : String(body.mlMattWord));
     if ("mlOfficial" in body) set("ml_official", Boolean(body.mlOfficial));
+    if ("trackedLinks" in body) set("tracked_links", Boolean(body.trackedLinks));
     await q(`UPDATE settings SET ${sets.join(", ")} WHERE company_id = $1`, params);
     if (typeof body.mlCookie === "string" && body.mlCookie.trim()) {
       const cookie = body.mlCookie.trim();
@@ -2354,10 +2356,18 @@ app.get("/vitrine/:tenantId", async (req, res) => {
   <header><p>Ofertas do dia</p><h1>${escapeHtml(company.name)}</h1></header><main>${cards || "<p>Nenhuma oferta publicada ainda.</p>"}</main></html>`);
 });
 
+// Clique no link rastreado: conta (menos robôs e pré-visualizações) e leva ao link de afiliado gravado na publicação.
 app.get("/go/:token", async (req, res) => {
-  const row = await one<{ url: string }>("UPDATE posts SET click_count = click_count + 1 WHERE click_token = $1 AND status = 'sent' RETURNING url", [req.params.token]);
-  if (!row?.url) return res.status(404).send("Oferta não encontrada");
-  res.redirect(302, row.url);
+  const token = String(req.params.token || "");
+  if (!/^[0-9a-f]{16}$/.test(token)) return res.status(404).send("Oferta não encontrada");
+  const counted = countsAsClick(req.method, String(req.headers["user-agent"] || ""));
+  const row = counted
+    ? await one<{ url: string }>("UPDATE posts SET click_count = click_count + 1 WHERE click_token = $1 AND status = 'sent' RETURNING url", [token])
+    : await one<{ url: string }>("SELECT url FROM posts WHERE click_token = $1 AND status = 'sent'", [token]);
+  const target = redirectTarget(row?.url);
+  if (!target) return res.status(404).send("Oferta não encontrada");
+  res.set("Cache-Control", "no-store");
+  res.redirect(302, target);
 });
 
 app.get("/api/notices", auth, async (req, res) => {

@@ -16,6 +16,7 @@ import { searchRakuten } from "../deals/searchRakuten";
 import { searchLomadee } from "../deals/searchLomadee";
 import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
+import { publicBase, trackedUrl } from "../deals/trackedLink";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
 import { TYPE_GAP, URGENT_BONUS, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
 import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
@@ -48,6 +49,7 @@ type Setting = {
   ml_matt_word: string;
   ml_official: boolean;
   ml_cookie_enc: string;
+  tracked_links: boolean;
 };
 
 type StoreRow = {
@@ -404,6 +406,11 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
     const setting = await q<Setting>("SELECT * FROM settings WHERE company_id = $1", [company.id]);
     const current = setting[0];
     if (!current?.enabled) return;
+    // Link rastreado: a mensagem leva <endereço do painel>/go/<token>, que conta o clique e redireciona
+    // para o link de afiliado gravado na publicação. Sem endereço público configurado, vai o link direto.
+    const [platform] = await q<{ public_url: string }>("SELECT public_url FROM platform_settings WHERE id = 1");
+    const linkBase = current.tracked_links === false ? "" : publicBase(platform?.public_url || "");
+    const linkFor = (token: string, direct: string) => (linkBase ? trackedUrl(linkBase, token) : direct);
     if (!insideSchedule({ hourStart: current.hour_start, hourEnd: current.hour_end, allowedDays: current.allowed_days })) {
       await q("UPDATE settings SET last_error = $2, updated_at = now() WHERE company_id = $1", [company.id, "Fora do horário ou do dia permitido"]);
       return;
@@ -760,7 +767,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             const token = crypto.randomBytes(8).toString("hex");
             try {
               // Só texto: a imagem chega pelo cartão de prévia do link e não pesa o celular de quem está no grupo.
-              await sendTextWithPreview(pub.id, group.group_jid, caption(offer, published), await previewOf());
+              await sendTextWithPreview(pub.id, group.group_jid, caption(offer, linkFor(token, published)), await previewOf());
               await q(
                 `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sent',$10,$11)`,
@@ -810,7 +817,8 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             if (!pub.recipients.length) throw new Error("ninguém para ver: ative um grupo nesta conexão ou traga contatos para a Base");
             // Status só de texto (formato curto); a foto do produto aparece no cartão de prévia do link.
             const preview = await previewOf();
-            const send = (to: string[]) => sendStatus(pub.id, to, null, statusCaption(offer, published), preview);
+            const statusToken = crypto.randomBytes(8).toString("hex");
+            const send = (to: string[]) => sendStatus(pub.id, to, null, statusCaption(offer, linkFor(statusToken, published)), preview);
             try {
               await send(pub.recipients);
             } catch (err) {
@@ -822,7 +830,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
             await q(
               `INSERT INTO posts (company_id, marketplace, external_id, title, price_cents, url, image_url, group_jid, group_name, status, click_token, whatsapp_id)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sent',$10,$11)`,
-              [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, `Status · ${pub.recipients.length} pessoas`, crypto.randomBytes(8).toString("hex"), pub.id]
+              [company.id, offer.marketplace, offer.externalId, offer.title, offer.priceCents, published, offer.imageUrl || null, STATUS_JID, `Status · ${pub.recipients.length} pessoas`, statusToken, pub.id]
             );
             sent += 1;
             pub.sentToday += 1;
@@ -855,7 +863,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
               if (dup.length) continue;
               const click = crypto.randomBytes(8).toString("hex");
               try {
-                const text = caption(offer, published);
+                const text = caption(offer, linkFor(click, published));
                 if (offer.imageUrl) {
                   try {
                     await axios.post(`https://api.telegram.org/bot${tokenBot}/sendPhoto`, {

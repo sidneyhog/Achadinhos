@@ -607,3 +607,23 @@ test("variedade: sorteio ponderado favorece a melhor oferta sem repetir sempre a
   assert.ok(firsts.fraca > 0, "a mais fraca também tem chance de sair primeiro");
   assert.ok(orders.size >= 4, "a ordem muda entre as rodadas");
 });
+
+test("link rastreado: leva ao link de afiliado gravado e não conta robôs", async () => {
+  const { trackedUrl, publicBase, countsAsClick, redirectTarget } = await import("../src/deals/trackedLink");
+  assert.equal(trackedUrl("https://achadinhos.exemplo.com/", "0123456789abcdef"), "https://achadinhos.exemplo.com/go/0123456789abcdef");
+  assert.equal(publicBase("https://achadinhos.exemplo.com/painel/"), "https://achadinhos.exemplo.com");
+  assert.equal(publicBase(""), "", "sem endereço público, vai o link direto");
+  assert.equal(publicBase("javascript:alert(1)"), "");
+  const afiliado = "https://www.mercadolivre.com.br/p/MLB28439147?matt_tool=37146732&matt_word=robson&forceInApp=true";
+  assert.equal(redirectTarget(afiliado), afiliado, "o destino é exatamente o link gravado, com loja e afiliado intactos");
+  assert.equal(redirectTarget("https://s.shopee.com.br/AbCdE"), "https://s.shopee.com.br/AbCdE");
+  assert.equal(redirectTarget("javascript:alert(1)"), null);
+  assert.equal(redirectTarget(null), null);
+  const celular = "Mozilla/5.0 (Linux; Android 14; SM-A546E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36";
+  assert.equal(countsAsClick("GET", celular), true);
+  assert.equal(countsAsClick("HEAD", celular), false);
+  assert.equal(countsAsClick("GET", "WhatsApp/2.24.1 A"), false);
+  assert.equal(countsAsClick("GET", "facebookexternalhit/1.1"), false);
+  assert.equal(countsAsClick("GET", "TelegramBot (like TwitterBot)"), false);
+  assert.equal(countsAsClick("GET", ""), false);
+});
