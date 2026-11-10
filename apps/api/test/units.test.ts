@@ -754,3 +754,8 @@ test("só Mercado Livre, Amazon, Shopee e Magalu estão liberadas", async () => 
   assert.equal(isLiveStore("awin"), false);
   assert.equal(isLiveStore("magalu"), true);
 });
+
+test("Fontes da Amazon: aviso de frete não vira nome", async () => {
+  const { readTitle } = await import("../src/deals/telegramSources");
+  assert.equal(readTitle("Frete grátis | Amazon Prime\nCreme Dental Sensodyne Alívio 3 unids de 90g\nR$ 18"), "Creme Dental Sensodyne Alívio 3 unids de 90g");
+});

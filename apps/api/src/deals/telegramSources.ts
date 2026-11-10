@@ -95,7 +95,7 @@ export const readTitle = (text: string) => {
     .slice(0, 6);
   for (const clean of lines) {
     if (clean.length < 8 || /R\$/.test(clean)) continue;
-    if (/^(oferta|promo(ção)?|corre|achadinho|imperd[ií]vel|bug|cupom|link|compre aqui|confira|aproveite|acabou de sair|vers[aã]o|esquenta|leve mais|link para|pre[cç]o pode)\b/i.test(clean) || /pode ser alterad|sujeit[oa] a altera/i.test(clean)) continue;
+    if (/^(oferta|promo(ção)?|corre|achadinho|imperd[ií]vel|bug|cupom|link|compre aqui|confira|aproveite|acabou de sair|vers[aã]o|esquenta|leve mais|link para|pre[cç]o pode|frete gr[aá]tis)\b/i.test(clean) || /pode ser alterad|sujeit[oa] a altera|amazon prime/i.test(clean)) continue;
     const letters = clean.replace(/[^A-Za-zÀ-ÿ]/g, "");
     const upper = letters.replace(/[^A-ZÀ-Þ]/g, "").length / Math.max(1, letters.length);
     let score = Math.min(clean.length, 80) / 10;
