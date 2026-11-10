@@ -1,6 +1,7 @@
 import { audit, migrate, q } from "./db";
 import { remindDue } from "./reminders";
 import { forgetStatusAudience, runDueDeals, statusTest } from "./engine/runDeals";
+import { refreshAmazonSources } from "./engine/amazonSources";
 import { tickAudience } from "./engine/audience";
 import { phoneFromParticipant } from "./deals/audiencePolicy";
 import { getRedis } from "./redis";
@@ -237,6 +238,12 @@ const tick = async () => {
   try {
     await suspendExpired();
     await remindDue();
+    // Fontes da Amazon (canais do Telegram): a cada 10 minutos, sem segurar o tick.
+    void withLock("amazon-sources", 600, () => refreshAmazonSources())
+      .then(saved => {
+        if (saved) console.log(`[fontes] ${saved} promoção(ões) da Amazon na fila central`);
+      })
+      .catch(err => console.error("[fontes]", err));
     // Sem await: cada empresa segue no seu ritmo e o próximo tick só começa as que não estão rodando.
     void runDueDeals()
       .then(sent => {

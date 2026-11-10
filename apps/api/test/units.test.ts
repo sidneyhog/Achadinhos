@@ -681,3 +681,42 @@ test("Magalu: lê produtos da vitrine e monta o link na loja de cada cliente", a
   for (let cursor = 0; cursor < MAGALU_CATEGORIES.length; cursor += 3) magaluSourcesFor(cursor).slice(1).forEach(path => vistos.add(path));
   assert.equal(vistos.size, MAGALU_CATEGORIES.length, "o rodízio passa por todas as categorias");
 });
+
+test("Fontes da Amazon: lê postagens do canal, preço, nome, foto e produto", async () => {
+  const { channelName, channelList, readPrices, readTitle, readChannelPage, asinFromUrl } = await import("../src/deals/telegramSources");
+  assert.equal(channelName("https://t.me/s/FadaPromos"), "fadapromos");
+  assert.equal(channelName("@fadapromos"), "fadapromos");
+  assert.equal(channelName("t.me/+convitePrivado"), "", "convite privado não é canal público");
+  assert.deepEqual(channelList("t.me/aaaa1\n@aaaa1, bbbb2;;"), ["aaaa1", "bbbb2"]);
+
+  assert.deepEqual(readPrices("🔥 Fone JBL\nDe R$ 399,00 por R$ 229,90\n🎟️ Cupom de R$ 20 OFF"), { priceCents: 22990, originalPriceCents: 39900 });
+  assert.deepEqual(readPrices("Air Fryer\n💰 R$ 262\n✅ Frete grátis acima de R$ 99"), { priceCents: 26200, originalPriceCents: null });
+  assert.deepEqual(readPrices("Ganhe um cupom de R$1000 OFF"), { priceCents: 0, originalPriceCents: null });
+  assert.equal(readPrices("Notebook R$ 2.499,90 no Pix").priceCents, 249990);
+
+  assert.equal(readTitle("🔥🔥 OFERTA 🔥🔥\n📦 Micro-ondas Philco 20L Branco\nR$ 299"), "Micro-ondas Philco 20L Branco");
+
+  const post = (id: number, text: string, extra = "") => `<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message" data-post="canal/${id}">
+    <a class="tgme_widget_message_photo_wrap" style="width:800px;background-image:url('https://cdn4.telesco.pe/file/abc${id}.jpg')"></a>
+    <div class="tgme_widget_message_text js-message_text" dir="auto">${text}</div>${extra}
+    <time datetime="2026-11-10T15:03:00+00:00" class="time">15:03</time></div></div>`;
+  const html = post(1, "Micro-ondas Philco 20L<br/><br/>R&#036; 299,00<br/><a href=\"https://amzn.to/abc123\">https://amzn.to/abc123</a>")
+    + post(2, "Sem link de loja nenhuma R$ 10")
+    + post(3, "Kindle 11ª geração<br/>por R$ 449,00<br/><a href=\"https://www.amazon.com.br/dp/B0CP31L73X?tag=outro-20\">link</a>");
+  const posts = readChannelPage(html, "canal");
+  assert.equal(posts.length, 2, "postagem sem link da Amazon fica de fora");
+  assert.equal(posts[0].title, "Micro-ondas Philco 20L");
+  assert.equal(posts[0].priceCents, 29900);
+  assert.equal(posts[0].imageUrl, "https://cdn4.telesco.pe/file/abc1.jpg");
+  assert.equal(posts[0].postedAt, Date.parse("2026-11-10T15:03:00+00:00"));
+  assert.equal(asinFromUrl(posts[1].links[0]), "B0CP31L73X");
+  assert.equal(asinFromUrl("https://www.amazon.com.br/b?node=220818659011&tag=x-20"), "", "página de categoria não vira produto");
+  assert.equal(asinFromUrl("https://www.amazon.com.br/Kindle-Geracao/dp/B0CP31L73X/ref=x"), "B0CP31L73X");
+});
+
+test("Fontes da Amazon: oferta da fila central sai com a tag da empresa, não a da fonte", async () => {
+  const { amazonQueueOffer } = await import("../src/deals/amazonExtension");
+  const offer = amazonQueueOffer({ external_id: "B0CP31L73X", title: "Kindle", price_cents: 44900, original_price_cents: 54900, image_url: null }, "robson-20");
+  assert.equal(offer.url, "https://www.amazon.com.br/dp/B0CP31L73X?tag=robson-20");
+  assert.equal(offer.discountPercent, 18);
+});

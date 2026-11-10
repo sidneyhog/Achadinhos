@@ -861,6 +861,20 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 </form>
               </article>
               <article className="sx-card">
+                <div className="sx-card__head"><div><h2>Fontes da Amazon</h2><p>Canais públicos do Telegram que postam promoções da Amazon. A cada 10 minutos o robô lê as postagens novas, separa os produtos com preço e põe numa fila que todas as empresas publicam, cada uma com a própria tag.</p></div></div>
+                <form className="sx-form" onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  run("Salvo", "Os canais foram gravados. A próxima leitura sai em até 10 minutos.", () => api("/api/admin/platform", { method: "PUT", body: JSON.stringify({ amazonSources: form.get("sources") }) }));
+                }}>
+                  <label className="is-wide">Canais (um por linha: t.me/nome ou @nome)<textarea name="sources" rows={5} defaultValue={board.platform.amazonSources || ""} placeholder={"t.me/fadapromos\n@outrocanal"} /></label>
+                  <div><button className="sx-btn is-solid" type="submit">Salvar canais</button></div>
+                </form>
+                {(board.amazonSources || []).length ? (
+                  <div className="sx-tablewrap"><table className="sx-table"><thead><tr><th>Canal</th><th>Última leitura</th><th>Achou</th><th>Na fila agora</th></tr></thead><tbody>{board.amazonSources.map((row: any) => <tr key={row.name}><td>t.me/{row.name}{row.last_error ? <small>{row.last_error}</small> : null}</td><td>{row.last_read_at ? when(row.last_read_at) : "ainda não lido"}</td><td>{row.last_found}</td><td>{row.active}</td></tr>)}</tbody></table></div>
+                ) : <Empty title="Nenhum canal lido ainda" text="Salve os canais. A primeira leitura sai em até 10 minutos." />}
+              </article>
+              <article className="sx-card">
                 <div className="sx-card__head"><div><h2>Notificações</h2><p>Avisos já gerados para as empresas.</p></div></div>
                 {(board.reminders || []).length ? (
                   <div className="sx-tablewrap"><table className="sx-table"><thead><tr><th>Empresa</th><th>Aviso</th><th>Canal</th><th>Status</th></tr></thead><tbody>{board.reminders.map((row: any) => <tr key={row.id}><td>{row.company}</td><td>{row.title}<small>{row.detail || when(row.created_at)}</small></td><td>{labelOf(row.channel)}</td><td><Badge tone={toneOf(row.status)}>{labelOf(row.status)}</Badge></td></tr>)}</tbody></table></div>

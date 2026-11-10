@@ -19,6 +19,7 @@ import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace } from "./deals/statusPolicy";
 import { countsAsClick, isClickToken, redirectTarget } from "./deals/trackedLink";
+import { channelList } from "./deals/telegramSources";
 import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
 import { AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, amazonQueueOffer, readAmazonItem } from "./deals/amazonExtension";
 import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
@@ -644,8 +645,14 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
         paymentProvider: platform.payment_provider || "",
         pagbankSet: Boolean(platform.pagbank_token_enc),
         pagbankSandbox: platform.pagbank_sandbox !== false,
-        publicUrl: platform.public_url || ""
+        publicUrl: platform.public_url || "",
+        amazonSources: (await one<{ amazon_sources: string }>("SELECT amazon_sources FROM platform_settings WHERE id = 1"))?.amazon_sources || ""
       },
+      amazonSources: await q(
+        `SELECT c.name, c.last_read_at, c.last_error, c.last_found,
+                (SELECT count(*)::int FROM source_offers o WHERE o.source = c.name AND o.expires_at > now()) AS active
+         FROM source_channels c ORDER BY c.name`
+      ),
       reminders: await q("SELECT n.id, c.name AS company, n.title, n.status, n.channel, n.detail, n.created_at FROM notices n JOIN companies c ON c.id = n.company_id ORDER BY n.id DESC LIMIT 40"),
       testimonials: await q("SELECT * FROM testimonials ORDER BY sort_order, id")
     });
@@ -705,6 +712,12 @@ app.put("/api/admin/platform", auth, admin, async (req, res) => {
   const smtpPass = String(req.body?.smtpPass || "").trim();
   const smtpPassEnc = smtpPass ? encrypt(smtpPass) : current.smtp_pass_enc;
   // PagBank: token cifrado (em branco mantém o atual), ambiente, qual cobrança está ativa e o endereço público do site.
+  if (req.body?.amazonSources != null) {
+    const list = channelList(String(req.body.amazonSources));
+    await q("UPDATE platform_settings SET amazon_sources = $1 WHERE id = 1", [list.join("\n")]);
+    await q("DELETE FROM source_channels WHERE NOT (name = ANY($1::text[]))", [list]);
+    return res.json({ ok: true, amazonSources: list });
+  }
   const pagbankToken = String(req.body?.pagbankToken || "").trim();
   const paymentProvider = req.body?.paymentProvider == null ? current.payment_provider : (["pagbank", "efi"].includes(String(req.body.paymentProvider)) ? String(req.body.paymentProvider) : "");
   const publicUrl = req.body?.publicUrl == null ? current.public_url : String(req.body.publicUrl).trim().replace(/\/+$/, "");

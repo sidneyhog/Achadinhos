@@ -295,12 +295,19 @@ const fetchOffers = async (
     );
     const fromExtension = queued.map(row => amazonQueueOffer(row, tag));
     const seen = new Set(fromExtension.map(offer => offer.externalId));
+    // Fila central (Fontes da Amazon): promoções dos canais públicos cadastrados no super admin, com a tag desta empresa.
+    const central = await q<{ external_id: string; title: string; price_cents: number; original_price_cents: number | null; image_url: string | null }>(
+      `SELECT external_id, title, price_cents, original_price_cents, image_url FROM source_offers
+       WHERE marketplace = 'amazon' AND expires_at > now() ORDER BY posted_at DESC LIMIT 300`
+    );
+    const fromSources = central.filter(row => !seen.has(row.external_id)).map(row => ({ ...amazonQueueOffer(row, tag), category: "" }));
+    fromSources.forEach(offer => seen.add(offer.externalId));
     const links = amazonOffersFromLinks(secret.links || pub.links || "", tag).filter(offer => !seen.has(offer.externalId));
     // Sem isto o painel dizia "Nenhuma oferta passou nos filtros", e o motivo real (nada na fila) ficava escondido.
-    if (!fromExtension.length && !links.length) {
-      throw new Error("nenhum produto na fila: use o botão \"Enviar ao Achadinhos\" da extensão na página do produto da Amazon, ou cole links em Lojas → Amazon");
+    if (!fromExtension.length && !fromSources.length && !links.length) {
+      throw new Error("nenhuma promoção da Amazon agora: as fontes não postaram nada recente, e a fila da extensão está vazia");
     }
-    return [...fromExtension, ...links];
+    return [...fromExtension, ...fromSources, ...links];
   }
   if (marketplace === "shopee") {
     // O painel salva o App ID em public_config e só o Secret nos segredos.

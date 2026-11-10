@@ -95,6 +95,7 @@ export const migrate = async () => {
     ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS pagbank_sandbox BOOLEAN NOT NULL DEFAULT TRUE;
     ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS public_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS short_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS amazon_sources TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS wa_address_book (
       whatsapp_id INTEGER NOT NULL,
       jid TEXT NOT NULL,
@@ -184,6 +185,27 @@ export const migrate = async () => {
       expires_at TIMESTAMPTZ,
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- Fila central de promoções lidas dos canais públicos do Telegram (Fontes da Amazon). Vale para todas as empresas.
+    CREATE TABLE IF NOT EXISTS source_offers (
+      marketplace TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      price_cents INTEGER NOT NULL,
+      original_price_cents INTEGER,
+      image_url TEXT,
+      source TEXT NOT NULL,
+      post_id TEXT NOT NULL DEFAULT '',
+      posted_at TIMESTAMPTZ NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (marketplace, external_id)
+    );
+    CREATE INDEX IF NOT EXISTS source_offers_expires ON source_offers (marketplace, expires_at DESC);
+    CREATE TABLE IF NOT EXISTS source_channels (
+      name TEXT PRIMARY KEY,
+      last_read_at TIMESTAMPTZ,
+      last_error TEXT,
+      last_found INTEGER NOT NULL DEFAULT 0
     );
     -- Produtos que a empresa mandou pelo botão da extensão (Amazon). Valem até expires_at: preço da Amazon muda no dia.
     CREATE TABLE IF NOT EXISTS extension_offers (
