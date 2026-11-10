@@ -71,3 +71,10 @@ export const marketplaceLabel = (marketplace: string): string => {
   if (marketplace === "shein") return "Shein";
   return marketplace;
 };
+
+/**
+ * Lojas liberadas para os clientes. As demais aparecem como "Em breve" no painel, não podem ser configuradas
+ * e o robô não busca nelas, até serem validadas. Para liberar uma loja, é só incluí-la aqui e no painel (LIVE_STORE_IDS).
+ */
+export const LIVE_STORES = ["ml", "amazon", "shopee", "magalu"] as const;
+export const isLiveStore = (marketplace: string) => (LIVE_STORES as readonly string[]).includes(marketplace);

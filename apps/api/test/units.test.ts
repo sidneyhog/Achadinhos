@@ -746,3 +746,11 @@ test("Fontes da Amazon: aviso de preço não vira nome", async () => {
   const { readTitle } = await import("../src/deals/telegramSources");
   assert.equal(readTitle("Preço pode ser alterado a qualquer momento\nProtetor Solar Skin Aqua FPS50 40g\nR$ 43"), "Protetor Solar Skin Aqua FPS50 40g");
 });
+
+test("só Mercado Livre, Amazon, Shopee e Magalu estão liberadas", async () => {
+  const { isLiveStore, LIVE_STORES } = await import("../src/deals/types");
+  assert.deepEqual([...LIVE_STORES].sort(), ["amazon", "magalu", "ml", "shopee"]);
+  assert.equal(isLiveStore("aliexpress"), false);
+  assert.equal(isLiveStore("awin"), false);
+  assert.equal(isLiveStore("magalu"), true);
+});

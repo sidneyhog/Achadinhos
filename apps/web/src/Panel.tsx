@@ -25,6 +25,10 @@ const STORES = [
   { id: "shein", label: "Shein", logo: "shein.svg" }
 ];
 
+/** Lojas liberadas. As demais aparecem como "Em breve" e não podem ser configuradas (o servidor também bloqueia). */
+const LIVE_STORE_IDS = ["ml", "amazon", "shopee", "magalu"];
+const LIVE_STORES = STORES.filter((store) => LIVE_STORE_IDS.includes(store.id));
+
 const NAV = [
   ["dash", "Dashboard"],
   ["stores", "Lojas"],
@@ -191,13 +195,14 @@ const GUIDES = [
   ["whatsapp", "WA", "WhatsApp", "Implementado", "Como conectar o WhatsApp", "5 min · Primeiros passos · Iniciante", "Cada conexão mostra os grupos dela. Uma conexão pode ficar só com uma loja."],
   ["telegram", "TG", "Telegram", "Implementação parcial", "Publicar no Telegram", "8 min · Primeiros passos · Iniciante", "Dá para ter vários bots. Cada um fica com a própria loja ou categoria."],
   ["ml", "ML", "Mercado Livre", "Implementado", "Configurar o Mercado Livre", "10 min · Lojas · Intermediário", "Conta e Matt Tool saem de um link seu. Cookie só entra no link oficial."],
-  ["shein", "SH", "Shein", "Implementação parcial", "Configurar a Shein", "8 min · Lojas · Avançado", "A Shein identifica a conta no link onelink. O Achadinhos guarda esse código."],
-  ["rakuten", "RA", "Rakuten Advertising", "Implementação parcial", "Configurar a Rakuten", "12 min · Lojas · Intermediário", "Client ID, Client Secret e SID liberam a busca de produtos da Rakuten."],
-  ["ali", "AE", "AliExpress", "Implementado", "Configurar a AliExpress", "15 min · Lojas · Avançado", "App Key, Secret e Tracking ID. Sem eles a busca de produtos entra no lugar."],
-  ["awin", "AW", "Awin", "Implementação parcial", "Configurar a Awin", "10 min · Lojas · Intermediário", "Id do publisher e o token da API. Clube Samsung e Casas Bahia usam a mesma conta."],
-  ["shopee", "SP", "Shopee", "Implementação parcial", "Configurar a Shopee", "15 min · Lojas · Avançado", "A publicação automática espera App ID e Secret da API de afiliados."],
-  ["amazon", "AM", "Amazon", "Implementação parcial", "Configurar a Amazon", "5 min · Lojas · Iniciante", "A Partner Tag conecta a conta. Sem a API, o robô publica os links que você colar."],
-  ["epoca", "EP", "Época Cosméticos", "Implementado", "Configurar a Época", "5 min · Lojas · Iniciante", "A Época está na Lomadee. Basta a chave da API do painel da Lomadee."]
+  ["amazon", "AM", "Amazon", "Implementado", "Configurar a Amazon", "5 min · Lojas · Iniciante", "Basta a Partner Tag: o robô publica as promoções da Amazon com a sua tag, sem PC."],
+  ["shopee", "SP", "Shopee", "Implementado", "Configurar a Shopee", "15 min · Lojas · Avançado", "App ID e Secret da API de afiliados da Shopee, pedidos na sua conta de afiliado."],
+  ["magalu", "MG", "Magalu", "Implementado", "Configurar a Magalu", "5 min · Lojas · Iniciante", "O endereço da sua loja Parceiro Magalu. O robô busca as ofertas sozinho."],
+  ["ali", "AE", "AliExpress", "Em breve", "AliExpress", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."],
+  ["awin", "AW", "Awin", "Em breve", "Awin, Clube Samsung e Casas Bahia", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."],
+  ["rakuten", "RA", "Rakuten Advertising", "Em breve", "Rakuten", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."],
+  ["epoca", "EP", "Época Cosméticos", "Em breve", "Época Cosméticos", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."],
+  ["shein", "SH", "Shein", "Em breve", "Shein", "Em validação", "Estamos validando a integração. Em breve ela fica disponível para configurar."]
 ];
 
 /**
@@ -387,6 +392,7 @@ const GUIDE_STEPS: Record<string, string[]> = {
   rakuten: STORE_HELP.rakuten.steps,
   shein: STORE_HELP.shein.steps,
   amazon: STORE_HELP.amazon.steps,
+  magalu: STORE_HELP.magalu.steps,
   epoca: STORE_HELP.epoca.steps
 };
 
@@ -1420,8 +1426,18 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
               </section>
               <input className="aff-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar loja" />
               <div className="aff-shops">
-                {STORES.filter((store) => store.label.toLowerCase().includes(query.toLowerCase())).map((store) => {
+                {[...LIVE_STORES, ...STORES.filter((store) => !LIVE_STORE_IDS.includes(store.id))].filter((store) => store.label.toLowerCase().includes(query.toLowerCase())).map((store) => {
                   const row = stores.find((item) => item.marketplace === store.id);
+                  if (!LIVE_STORE_IDS.includes(store.id)) {
+                    return (
+                      <article key={store.id} className="aff-shop is-soon">
+                        <div className="aff-shop__mark"><img src={`/deals-logos/${store.logo}`} alt="" /></div>
+                        <header><strong>{store.label}</strong><em className="is-soon">Em breve</em></header>
+                        <p>Estamos validando a integração com esta loja. Assim que estiver pronta, ela aparece liberada aqui.</p>
+                        <button type="button" disabled>Em breve</button>
+                      </article>
+                    );
+                  }
                   const stats = pulse(store.id);
                   const ready = store.id === "ml"
                     ? Boolean(setting?.ml_matt_word || setting?.ml_tag)
@@ -1461,7 +1477,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                 }
               }}>
                 <label>Palavra-chave<input name="query" placeholder="fone bluetooth" required /></label>
-                <label>Loja<select name="store">{STORES.map((store) => <option key={store.id} value={store.id}>{store.label}</option>)}</select></label>
+                <label>Loja<select name="store">{LIVE_STORES.map((store) => <option key={store.id} value={store.id}>{store.label}</option>)}</select></label>
                 <label>Desconto mínimo (%)<input name="discount" /></label>
                 <label>Preço máximo (R$)<input name="max" /></label>
                 <button className="is-solid" type="submit">Criar campanha</button>
@@ -1496,7 +1512,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                 <h2>Ofertas</h2>
                 <div className="aff-filters">
                   <button type="button" className={offerStore === "all" ? "is-on" : ""} onClick={() => setOfferStore("all")}>Todas</button>
-                  {STORES.map((store) => <button key={store.id} type="button" className={offerStore === store.id ? "is-on" : ""} onClick={() => setOfferStore(store.id)}>{store.label}</button>)}
+                  {LIVE_STORES.map((store) => <button key={store.id} type="button" className={offerStore === store.id ? "is-on" : ""} onClick={() => setOfferStore(store.id)}>{store.label}</button>)}
                 </div>
               </header>
               <div className="aff-toolbar">
@@ -1670,7 +1686,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
               {connections.filter((item) => item.id === openConn).map((item) => {
                 const phase = waPhase(item);
                 const online = phase === "on";
-                const chosen = Array.isArray(item.stores) && item.stores.length ? item.stores : STORES.map((store) => store.id);
+                const chosen = Array.isArray(item.stores) && item.stores.length ? item.stores : LIVE_STORES.map((store) => store.id);
                 const book = groupBook[item.id];
                 const listed = book?.groups || [];
                 const query = (groupQuery[item.id] || "").trim().toLowerCase();
@@ -1778,7 +1794,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                           <div>
                             <p>Esta conexão publica nas lojas marcadas. Marque ao menos uma.</p>
                             <div className="aff-filters">
-                              {STORES.map((store) => {
+                              {LIVE_STORES.map((store) => {
                                 const on = chosen.includes(store.id);
                                 return (
                                   <button key={store.id} type="button" className={on ? "is-on" : ""} onClick={async () => {
@@ -1875,7 +1891,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
               })}
               {bots.filter((bot) => bot.id === openBot).map((bot) => {
                 const draft = chatDraft[bot.id] || { chatId: "", title: "" };
-                const botStores = Array.isArray(bot.stores) && bot.stores.length ? bot.stores : STORES.map((store) => store.id);
+                const botStores = Array.isArray(bot.stores) && bot.stores.length ? bot.stores : LIVE_STORES.map((store) => store.id);
                 const chats = Array.isArray(bot.chats) ? bot.chats : [];
                 return (
                   <div key={bot.id} className="aff-modal" role="dialog" aria-modal="true">
@@ -1905,7 +1921,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                           <div>
                             <p>Este bot publica nas lojas marcadas.</p>
                             <div className="aff-filters">
-                              {STORES.map((store) => {
+                              {LIVE_STORES.map((store) => {
                                 const on = botStores.includes(store.id);
                                 return (
                                   <button key={store.id} type="button" className={on ? "is-on" : ""} onClick={async () => {
@@ -2373,7 +2389,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                     <article key={item[0]} className="aff-guide-card">
                       <header>
                         <span className="aff-guide-card__logo"><span className="aff-guide__mark">{item[1]}</span></span>
-                        <div className="aff-guide-card__id"><strong>{item[2]}</strong><span className={`aff-pill ${item[3] === "Implementado" ? "is-ok" : "is-partial"}`}>{item[3]}</span></div>
+                        <div className="aff-guide-card__id"><strong>{item[2]}</strong><span className={`aff-pill ${item[3] === "Implementado" ? "is-ok" : item[3] === "Em breve" ? "is-soon" : "is-partial"}`}>{item[3]}</span></div>
                       </header>
                       <h3>{item[4]}</h3>
                       <ul><li>{item[5]}</li></ul>
@@ -2381,10 +2397,12 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                       {guide === item[0] && GUIDE_STEPS[item[0]] ? (
                         <ol className="aff-steps">{GUIDE_STEPS[item[0]].map((step) => <li key={step}>{step}</li>)}</ol>
                       ) : null}
-                      <div className="aff-guide-card__actions">
-                        <button type="button" className="is-solid" onClick={() => setGuide(guide === item[0] ? "" : item[0])}>{guide === item[0] ? "Fechar guia" : "Abrir guia"}</button>
-                        <button type="button" onClick={() => setView("stores")}>Ver documentação</button>
-                      </div>
+                      {item[3] === "Em breve" ? null : (
+                        <div className="aff-guide-card__actions">
+                          <button type="button" className="is-solid" onClick={() => setGuide(guide === item[0] ? "" : item[0])}>{guide === item[0] ? "Fechar guia" : "Abrir guia"}</button>
+                          <button type="button" onClick={() => setView("stores")}>Ver documentação</button>
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>

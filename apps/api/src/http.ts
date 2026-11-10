@@ -14,7 +14,7 @@ import { stopSession } from "./zapo/session";
 import { askWorker } from "./zapo/bridge";
 import { AUDIENCE_LIMITS, saveContacts, tickAudience } from "./engine/audience";
 import { createOfficialMlLink, mercadoLivreCookieExpiry, reportMlLink, stripMlTracking } from "./deals/mlAffiliate";
-import { marketplaceLabel } from "./deals/types";
+import { isLiveStore, marketplaceLabel } from "./deals/types";
 import { clockMinutes } from "./deals/schedule";
 import { audienceRowsFromTable, brasiliaDayStart, clampJobPace, normalizeAudiencePhone } from "./deals/audiencePolicy";
 import { clampStatusPace, STATUS_JID } from "./deals/statusPolicy";
@@ -1179,6 +1179,7 @@ app.put("/api/stores/:marketplace", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const marketplace = String(req.params.marketplace);
     if (!STORES.includes(marketplace)) return res.status(400).json({ error: "Loja desconhecida" });
+    if (!isLiveStore(marketplace)) return res.status(403).json({ error: "Esta loja chega em breve. Por enquanto, use Mercado Livre, Amazon, Shopee e Magalu." });
     const existing = await one<{ enabled: boolean; secrets_enc: string }>("SELECT enabled, secrets_enc FROM stores WHERE company_id = $1 AND marketplace = $2", [companyId, marketplace]);
     const enabling = req.body?.enabled === true && !existing?.enabled;
     if (enabling) await assertRoom(companyId, "stores");
@@ -1213,6 +1214,7 @@ app.get("/api/campaigns", auth, async (req, res, next) => {
 app.post("/api/campaigns", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
+    if (!isLiveStore(String(req.body?.marketplace || "ml"))) return res.status(403).json({ error: "Esta loja chega em breve." });
     const row = await one(
       "INSERT INTO campaigns (company_id, marketplace, query, min_discount, max_price_cents) VALUES ($1,$2,$3,$4,$5) RETURNING *",
       [companyId, String(req.body?.marketplace || "ml"), String(req.body?.query || "").trim(), req.body?.minDiscount ?? null, req.body?.maxPriceCents ?? null]

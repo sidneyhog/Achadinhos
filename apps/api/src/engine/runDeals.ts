@@ -26,7 +26,7 @@ import {
   resolveMlTracking,
   stripMlTracking
 } from "../deals/mlAffiliate";
-import { DealOffer, marketplaceLabel, scoreOffer } from "../deals/types";
+import { DealOffer, isLiveStore, marketplaceLabel, scoreOffer } from "../deals/types";
 
 type Setting = {
   company_id: number;
@@ -466,7 +466,9 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       campaigns = campaigns.filter(item => item.marketplace !== "ml");
       if (stores.has("ml")) campaigns = [{ marketplace: "ml", query: "", min_discount: null, max_price_cents: null, priority: 0 }, ...campaigns];
     }
-    for (const id of ["shopee", "amazon", "aliexpress", "magalu", "awin", "rakuten", "epoca", "samsung", "casasbahia", "natura", "paguemenos"]) {
+    // Só lojas liberadas: as que estão "Em breve" ficam de fora mesmo que tenham sido ativadas antes.
+    campaigns = campaigns.filter(item => isLiveStore(item.marketplace));
+    for (const id of ["shopee", "amazon", "magalu"]) {
       if (stores.has(id) && !campaigns.some(item => item.marketplace === id)) {
         campaigns.push({ marketplace: id, query: "", min_discount: null, max_price_cents: null, priority: 0 });
       }

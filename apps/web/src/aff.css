@@ -1745,3 +1745,10 @@ button.land-brand { background: none; border: 0; padding: 0; cursor: pointer; fo
   .aff-posts__list img { width: 44px; height: 44px; }
   .aff-posts__clicks { grid-column: 1 / -1; justify-items: start; text-align: left; grid-auto-flow: column; justify-content: start; align-items: baseline; gap: 8px; }
 }
+
+/* Loja ainda não liberada. */
+.aff-shop.is-soon { opacity: .75; }
+.aff-shop.is-soon .aff-shop__mark img { filter: grayscale(1); }
+.aff-shop em.is-soon { background: #fef3c7; color: #92400e; }
+.aff-shop.is-soon p { margin-top: 8px; color: var(--muted); font-size: 13px; }
+.aff-pill.is-soon { background: #fef3c7; color: #92400e; }
