@@ -243,9 +243,11 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "15 min",
     portal: ["Abrir o AliExpress Portals", "https://portals.aliexpress.com"],
     steps: [
-      "No AliExpress Portals (programa de afiliados), crie um app de API. Ele mostra App Key e App Secret.",
-      "No mesmo portal, copie o seu Tracking ID.",
-      "Cole os três aqui, marque Publicar esta loja e salve."
+      "Abra o **AliExpress Portals** (programa de afiliados): https://portals.aliexpress.com",
+      "Crie um **app de API**. Ele mostra a **App Key** e o **App Secret**.",
+      "No mesmo portal, copie o seu **Tracking ID**.",
+      "Aqui, preencha:\n- App Key → **a App Key do app**\n- Secret → **o App Secret do app**\n- Tracking ID → **o seu Tracking ID**",
+      "Marque **Publicar esta loja** e salve."
     ]
   },
   amazon: {
@@ -265,9 +267,10 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "10 min",
     portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
     steps: [
-      "No painel da Awin, copie o seu Id do publisher (aparece no topo, ao lado do nome da conta).",
-      "Em Ferramentas → API Credentials, gere o token da API e copie.",
-      "Cole os dois aqui e salve. Clube Samsung, Casas Bahia, Natura e Pague Menos usam esta mesma conta."
+      "Abra o painel da Awin: https://ui.awin.com",
+      "Copie o seu **Id do publisher** (aparece no topo, ao lado do nome da conta).",
+      "Em **Ferramentas → API Credentials**, gere o **token da API** e copie.",
+      "Cole os dois aqui e salve. **Clube Samsung, Casas Bahia, Natura e Pague Menos** usam esta mesma conta."
     ]
   },
   samsung: {
@@ -275,9 +278,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "2 min",
     portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
     steps: [
-      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
-      "Na Awin, inscreva-se no programa Clube Samsung e espere a aprovação.",
-      "Aprovado, salve aqui. Não precisa colar nada."
+      "Configure a loja **Awin** primeiro: esta loja usa o mesmo **Id do publisher** e o mesmo **token**.",
+      "No painel da Awin (https://ui.awin.com), inscreva-se no programa **Clube Samsung** e espere a aprovação.",
+      "Aprovado, marque **Publicar esta loja** e salve. O **Anunciante** já vem preenchido, e o **Token da API** só precisa ser colado se esta loja tiver um token próprio."
     ]
   },
   casasbahia: {
@@ -285,9 +288,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "2 min",
     portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
     steps: [
-      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
-      "Na Awin, inscreva-se no programa Casas Bahia e espere a aprovação.",
-      "Aprovado, salve aqui. Não precisa colar nada."
+      "Configure a loja **Awin** primeiro: esta loja usa o mesmo **Id do publisher** e o mesmo **token**.",
+      "No painel da Awin (https://ui.awin.com), inscreva-se no programa **Casas Bahia** e espere a aprovação.",
+      "Aprovado, marque **Publicar esta loja** e salve. O **Anunciante** já vem preenchido, e o **Token da API** só precisa ser colado se esta loja tiver um token próprio."
     ]
   },
   natura: {
@@ -295,9 +298,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "2 min",
     portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
     steps: [
-      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
-      "Na Awin, inscreva-se no programa Natura e espere a aprovação.",
-      "Aprovado, salve aqui. Não precisa colar nada."
+      "Configure a loja **Awin** primeiro: esta loja usa o mesmo **Id do publisher** e o mesmo **token**.",
+      "No painel da Awin (https://ui.awin.com), inscreva-se no programa **Natura** e espere a aprovação.",
+      "Aprovado, marque **Publicar esta loja** e salve. O **Anunciante** já vem preenchido, e o **Token da API** só precisa ser colado se esta loja tiver um token próprio."
     ]
   },
   paguemenos: {
@@ -305,9 +308,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "2 min",
     portal: ["Abrir o painel da Awin", "https://ui.awin.com"],
     steps: [
-      "Configure a loja Awin primeiro: esta loja usa o mesmo publisher e token.",
-      "Na Awin, inscreva-se no programa Pague Menos e espere a aprovação.",
-      "Aprovado, salve aqui. Não precisa colar nada."
+      "Configure a loja **Awin** primeiro: esta loja usa o mesmo **Id do publisher** e o mesmo **token**.",
+      "No painel da Awin (https://ui.awin.com), inscreva-se no programa **Pague Menos** e espere a aprovação.",
+      "Aprovado, marque **Publicar esta loja** e salve. O **Anunciante** já vem preenchido, e o **Token da API** só precisa ser colado se esta loja tiver um token próprio."
     ]
   },
   rakuten: {
@@ -315,9 +318,11 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "12 min",
     portal: ["Abrir o painel da Rakuten", "https://cli.linksynergy.com"],
     steps: [
-      "No painel da Rakuten Advertising, abra a área de desenvolvedor (Web Services) e copie Client ID e Client Secret.",
-      "Copie também o SID: é o número do seu site, que aparece no menu da conta.",
-      "Cole os três aqui, marque Publicar esta loja e salve."
+      "Abra o painel da Rakuten Advertising: https://cli.linksynergy.com",
+      "Na área de desenvolvedor (**Web Services**), copie o **Client ID** e o **Client Secret**.",
+      "Copie também o **SID**: é o número do seu site, que aparece no menu da conta.",
+      "Aqui, preencha:\n- Client ID → **o Client ID**\n- Client Secret → **o Client Secret**\n- SID → **o número do seu site**",
+      "Marque **Publicar esta loja** e salve."
     ]
   },
   epoca: {
@@ -325,17 +330,18 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     time: "5 min",
     portal: ["Abrir a Lomadee", "https://www.lomadee.com"],
     steps: [
-      "A Época Cosméticos fica na Lomadee. No painel da Lomadee, copie a sua chave da API (x-api-key).",
-      "Cole aqui e salve. O robô busca o catálogo e publica com o seu link."
+      "A Época Cosméticos fica na **Lomadee**: https://www.lomadee.com",
+      "No painel da Lomadee, copie a sua **chave da API** (x-api-key).",
+      "Cole aqui, marque **Publicar esta loja** e salve. O robô busca o catálogo e publica com o seu link."
     ]
   },
   shein: {
     auto: false,
     time: "5 min",
     steps: [
-      "Gere um link de afiliado da Shein (começa com onelink.shein.com) e cole aqui.",
-      "Salve. O card passa de Pendente para Conectada quando a conta é reconhecida.",
-      "A Shein não entrega lista de produtos, então o robô não publica Shein sozinho."
+      "Gere um **link de afiliado da Shein** (começa com **onelink.shein.com**).",
+      "Cole em **Link de afiliado** e salve. O card passa de **Pendente** para **Conectada** quando a conta é reconhecida.",
+      "A Shein não entrega lista de produtos, então o robô **não publica Shein sozinho**."
     ]
   },
   magalu: {
@@ -353,9 +359,9 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
     auto: false,
     time: "3 min",
     steps: [
-      "Copie o seu ID de afiliado da Terabyte e cole aqui.",
-      "Salve. Ele entra nos links de produto da Terabyte.",
-      "A Terabyte não entrega lista de produtos, então o robô não publica Terabyte sozinho."
+      "Copie o seu **ID de afiliado da Terabyte**.",
+      "Cole em **ID da loja** e salve. Ele entra nos links de produto da Terabyte.",
+      "A Terabyte não entrega lista de produtos, então o robô **não publica Terabyte sozinho**."
     ]
   }
 };
@@ -409,17 +415,17 @@ function StoreHowTo({ id }: { id: string }) {
 /** Passo a passo de cada guia do Material de apoio. As lojas usam o mesmo texto da janela Configurar. */
 const GUIDE_STEPS: Record<string, string[]> = {
   whatsapp: [
-    "Vá em Conexões e clique em Nova conexão. Escolha WhatsApp e dê um nome (ex.: AchadosSp).",
-    "Clique em Conectar WhatsApp. Aparece um QR code.",
-    "No celular: WhatsApp → Aparelhos conectados → Conectar aparelho, e aponte para o QR code.",
-    "Com a conexão verde, marque os grupos que vão receber as ofertas.",
-    "Use um número só para o robô. Se o QR expirar, clique em Gerar novo QR."
+    "Vá em **Conexões** e clique em **Nova conexão**. Escolha **WhatsApp** e dê um nome (ex.: AchadosSp).",
+    "Clique em **Conectar WhatsApp**. Aparece um **QR code**.",
+    "No celular, abra o WhatsApp e vá em:\n- **Configurações** (ou os três pontinhos) → **Aparelhos conectados**\n- **Conectar aparelho** e aponte a câmera para o QR code",
+    "Com a conexão **verde**, marque os **grupos** que vão receber as ofertas.",
+    "Dicas:\n- Use **um número só para o robô**\n- Se o QR expirar, clique em **Gerar novo QR**"
   ],
   telegram: [
-    "No Telegram, abra o @BotFather, mande /newbot e siga as perguntas. Ele devolve um token (ex.: 123456:ABC...).",
-    "Adicione o bot como administrador no grupo ou canal que vai receber as ofertas.",
-    "No painel, Conexões → Nova conexão → Telegram. Cole o token do BotFather e crie.",
-    "Escolha os chats e as lojas que esse bot publica."
+    "No Telegram, abra o **@BotFather**, mande **/newbot** e siga as perguntas. Ele devolve um **token** (ex.: 123456:ABC...).",
+    "Adicione o bot como **administrador** no grupo ou canal que vai receber as ofertas.",
+    "No painel, vá em **Conexões → Nova conexão → Telegram**, cole o token do BotFather e crie.",
+    "Escolha os **chats** e as **lojas** que esse bot publica."
   ],
   ml: STORE_HELP.ml.steps,
   shopee: STORE_HELP.shopee.steps,
@@ -2436,7 +2442,18 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
                       {item[3] === "Em breve" ? null : (
                         <div className="aff-guide-card__actions">
                           <button type="button" className="is-solid" onClick={() => setGuide(guide === item[0] ? "" : item[0])}>{guide === item[0] ? "Fechar guia" : "Abrir guia"}</button>
-                          <button type="button" onClick={() => setView("stores")}>Ver documentação</button>
+                          {item[0] === "whatsapp" || item[0] === "telegram" ? (
+                            // WhatsApp e Telegram se configuram em Conexões; antes o botão levava para Lojas.
+                            <button type="button" onClick={() => setView("groups")}>Ir para Conexões</button>
+                          ) : (
+                            <button type="button" onClick={() => {
+                              // Abre a janela de configuração da própria loja (o guia "ali" é a loja "aliexpress").
+                              const storeId = item[0] === "ali" ? "aliexpress" : item[0];
+                              const store = STORES.find((entry) => entry.id === storeId);
+                              setView("stores");
+                              if (store && LIVE_STORE_IDS.includes(store.id)) setStoreModal({ ...store, row: stores.find((row) => row.marketplace === store.id) });
+                            }}>Configurar a loja</button>
+                          )}
                         </div>
                       )}
                     </article>
