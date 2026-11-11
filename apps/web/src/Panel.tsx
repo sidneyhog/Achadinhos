@@ -5,6 +5,7 @@ import type { Session } from "./App";
 import { Mark } from "./Mark";
 import { StatusTab } from "./StatusTab";
 import { BillingView } from "./BillingView";
+import { SupportWhats } from "./SupportWhats";
 import { go, PANEL_PATH, usePath } from "./route";
 import { destOf, filterHref, PostsView, type PostFilter } from "./PostsView";
 
@@ -2632,6 +2633,7 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
           </div>
         </div>
       ) : null}
+      {view === "stores" ? <SupportWhats text="Olá! Preciso de ajuda para configurar uma loja no Achadinhos." label="Ajuda pelo WhatsApp" /> : null}
       {storeModal ? <StoreDialog store={storeModal} setting={setting} onClose={() => setStoreModal(null)} onNotice={tell} onSaved={async () => { await reload(); tell("Salvo", "A configuração da loja foi gravada."); }} /> : null}
     </div>
   );
