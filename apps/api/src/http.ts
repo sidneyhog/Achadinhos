@@ -2313,9 +2313,13 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
         await q("UPDATE companies SET tax_id = $2 WHERE id = $1", [companyId, taxId]);
         return res.json({ configured: true, provider: "pagbank", invoice: invoiceView(row!) });
       } catch (err) {
-        await q("UPDATE invoices SET status = 'failed' WHERE id = $1", [invoice!.id]);
+        // O motivo fica na fatura e no log: antes só aparecia na tela, e três falhas seguidas não deixaram pista no servidor.
+        const reason = pagbankError(err);
+        const status = (err as { response?: { status?: number } })?.response?.status || null;
+        await q("UPDATE invoices SET status = 'failed', payload = $2::jsonb WHERE id = $1", [invoice!.id, JSON.stringify({ error: reason, httpStatus: status })]);
+        console.error(`[billing] PagBank recusou a fatura ${invoice!.id} (HTTP ${status ?? "-"}): ${reason}`);
         if (quote.couponId) await q("UPDATE coupons SET used_count = greatest(0, used_count - 1) WHERE id = $1", [quote.couponId]);
-        return res.status(502).json({ error: pagbankError(err) });
+        return res.status(502).json({ error: reason });
       }
     }
 

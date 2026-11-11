@@ -35,8 +35,12 @@ const client = async () => {
 
 /** Mensagem legível a partir do erro do PagBank. */
 export const pagbankError = (err: unknown) => {
-  const data = (err as { response?: { status?: number; data?: { error_messages?: Array<{ description?: string; parameter_name?: string }> } } })?.response;
+  const data = (err as { response?: { status?: number; data?: { error_messages?: Array<{ code?: string; description?: string; parameter_name?: string }> } } })?.response;
   const first = data?.data?.error_messages?.[0];
+  // Conta sem liberação de API em produção: o token está certo, falta pedir a liberação ao PagBank.
+  if (/whitelist|allowlist/i.test(`${first?.code || ""} ${first?.description || ""}`)) {
+    return "O PagBank ainda não liberou a API de pedidos para esta conta em produção (allowlist). O token está certo: peça a liberação ao suporte do PagBank.";
+  }
   if (data?.status === 401 || data?.status === 403) return "O PagBank recusou o token. Confira o token e o ambiente (teste ou produção).";
   if (first?.description) return `PagBank: ${first.description}${first.parameter_name ? ` (${first.parameter_name})` : ""}`;
   return (err as Error)?.message || "Falha ao falar com o PagBank";

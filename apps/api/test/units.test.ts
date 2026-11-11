@@ -251,6 +251,15 @@ test("Mercado Livre API oficial: mais vendidos viram ofertas com nome, foto, lin
   assert.equal(asked.includes("/products/MLB55762063"), false, "sem desconto, não gasta chamada buscando nome e foto");
 });
 
+test("PagBank: falta de liberação da API não vira \"token recusado\"", async () => {
+  const { pagbankError } = await import("../src/pagbank");
+  const resp = (status: number, code: string, description: string) => ({ response: { status, data: { error_messages: [{ code, description }] } } });
+  assert.match(pagbankError(resp(403, "allowlist_access_required", "Access denied")), /ainda não liberou a API/);
+  assert.match(pagbankError(resp(403, "whitelist_unauthorized", "")), /ainda não liberou a API/);
+  assert.match(pagbankError(resp(401, "UNAUTHORIZED", "Invalid credential")), /recusou o token/);
+  assert.equal(pagbankError(resp(400, "40002", "invalid_parameter")), "PagBank: invalid_parameter");
+});
+
 test("Amazon: alterna produtos da empresa com as promoções automáticas dos canais", async () => {
   const { interleaveBy, offerOrigin } = await import("../src/deals/variety");
   // Situação real de 11/11/2026: 19 produtos da extensão na frente e 28 dos canais sem vez nenhuma.
