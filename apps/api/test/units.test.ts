@@ -780,3 +780,11 @@ test("Fontes da Amazon: aviso de frete não vira nome", async () => {
   const { readTitle } = await import("../src/deals/telegramSources");
   assert.equal(readTitle("Frete grátis | Amazon Prime\nCreme Dental Sensodyne Alívio 3 unids de 90g\nR$ 18"), "Creme Dental Sensodyne Alívio 3 unids de 90g");
 });
+
+test("Shopee: erro 10000 (System Error) é passageiro; credencial errada não", async () => {
+  const { shopeeTransientError } = await import("../src/deals/searchShopee");
+  assert.equal(shopeeTransientError({ message: "error [10000]: System Error" }), true);
+  assert.equal(shopeeTransientError({ message: "x", extensions: { code: 10000 } }), true);
+  assert.equal(shopeeTransientError({ message: "Invalid Signature", extensions: { code: 10020 } }), false);
+  assert.equal(shopeeTransientError(null), false);
+});
