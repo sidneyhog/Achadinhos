@@ -19,7 +19,7 @@ import { cadenceSeconds, readSendCadence } from "../deals/sendCadence";
 import { insideSchedule } from "../deals/schedule";
 import { newShortCode, publicBase, trackedUrl } from "../deals/trackedLink";
 import { REPEAT_SQL, TITLE_KEY_SQL, titleKey } from "../deals/repeatPolicy";
-import { TYPE_GAP, URGENT_BONUS, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
+import { TYPE_GAP, URGENT_BONUS, interleaveBy, offerOrigin, productTypeKeys, spreadByType, varietyOrder } from "../deals/variety";
 import { STATUS_JID, STATUS_LIMITS, orderAudience, statusRecipients } from "../deals/statusPolicy";
 import {
   createOfficialMlLink,
@@ -697,9 +697,13 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
     for (const [marketplace, list] of byStore) {
       // Sorteio por pontuação e depois intercalado por tipo: sem três produtos parecidos seguidos, e o tipo que
       // saiu há pouco nesta empresa vai para o fim.
-      const ordered = spreadByType(
-        varietyOrder(list, offer => (offer.score || 0) + (offerEndsSoonText(offer.title) ? URGENT_BONUS : 0)),
-        recentTypes.get(company.id) || []
+      // Alterna o que a empresa escolheu (extensão, links) com o automático (canais), e cada origem segue o sorteio.
+      const ordered = interleaveBy(
+        spreadByType(
+          varietyOrder(list, offer => (offer.score || 0) + (offerEndsSoonText(offer.title) ? URGENT_BONUS : 0)),
+          recentTypes.get(company.id) || []
+        ),
+        offerOrigin
       );
       // Algum grupo, Status ou bot ainda quer oferta desta loja nesta rodada? Sem isto o laço passava pelas até 300
       // ofertas gerando um link meli.la para cada uma, mesmo com os lotes já completos.

@@ -1,17 +1,45 @@
 {
   "manifest_version": 3,
   "name": "Achadinhos - Mercado Livre e Amazon",
-  "version": "1.3.0",
-  "description": "Manda o cookie do Mercado Livre ao painel do Achadinhos e põe o botão Enviar ao Achadinhos na página do produto da Amazon.",
-  "permissions": ["cookies", "alarms", "storage"],
-  "host_permissions": ["https://*.mercadolivre.com.br/*", "https://*.mercadolivre.com/*"],
+  "version": "1.4.0",
+  "description": "Manda o cookie do Mercado Livre ao painel do Achadinhos e põe os botões Enviar ao Achadinhos (produto) e Enviar todos (listas de mais vendidos) na Amazon.",
+  "permissions": [
+    "cookies",
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.mercadolivre.com.br/*",
+    "https://*.mercadolivre.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.amazon.com.br/*/dp/*", "https://www.amazon.com.br/dp/*", "https://www.amazon.com.br/gp/product/*", "https://www.amazon.com.br/*/gp/product/*"],
-      "js": ["amazon.js"],
+      "matches": [
+        "https://www.amazon.com.br/*/dp/*",
+        "https://www.amazon.com.br/dp/*",
+        "https://www.amazon.com.br/gp/product/*",
+        "https://www.amazon.com.br/*/gp/product/*"
+      ],
+      "js": [
+        "amazon.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.amazon.com.br/gp/bestsellers*",
+        "https://www.amazon.com.br/*/gp/bestsellers/*",
+        "https://www.amazon.com.br/gp/new-releases*",
+        "https://www.amazon.com.br/gp/movers-and-shakers*",
+        "https://www.amazon.com.br/gp/most-wished-for*",
+        "https://www.amazon.com.br/*/zgbs/*"
+      ],
+      "js": [
+        "amazon-lista.js"
+      ],
       "run_at": "document_idle"
     }
   ],

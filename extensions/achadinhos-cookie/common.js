@@ -52,6 +52,26 @@ const enviarAmazon = async (produto) => {
   }
 };
 
+/** Todos os produtos de uma lista da Amazon (mais vendidos etc.), num envio só. */
+const enviarAmazonLista = async (produtos) => {
+  const { codigo } = await chrome.storage.local.get("codigo");
+  const destino = lerCodigo(codigo);
+  if (!destino) return { ok: false, erro: "Cole o código do painel na extensão primeiro" };
+  try {
+    const resposta = await fetch(`${destino.painel}/api/extension/amazon-items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Achadinhos-Key": destino.chave },
+      body: JSON.stringify({ items: produtos })
+    });
+    const dados = await resposta.json().catch(() => ({}));
+    return resposta.ok
+      ? { ok: true, adicionados: Number(dados.added) || 0, fila: Number(dados.queued) || 0 }
+      : { ok: false, erro: dados.error || `O painel respondeu ${resposta.status}` };
+  } catch (err) {
+    return { ok: false, erro: "Não consegui falar com o painel" };
+  }
+};
+
 /** Manda o cookie atual ao painel e guarda o resultado para o popup mostrar. */
 const enviarCookie = async () => {
   const { codigo } = await chrome.storage.local.get("codigo");

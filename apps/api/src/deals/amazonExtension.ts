@@ -9,7 +9,9 @@ import { DealOffer } from "./types";
 /** Preço da Amazon muda no mesmo dia: o produto sai da fila depois disto. */
 export const AMAZON_ITEM_HOURS = 24;
 /** Teto de produtos ativos por empresa na fila. */
-export const AMAZON_QUEUE_MAX = 200;
+export const AMAZON_QUEUE_MAX = 500;
+/** Produtos por envio do botão "Enviar todos" (uma página de mais vendidos tem até 50). */
+export const AMAZON_BATCH_MAX = 60;
 
 export type AmazonItem = {
   asin: string;

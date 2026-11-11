@@ -25,5 +25,9 @@ chrome.runtime.onMessage.addListener((pedido, _remetente, responder) => {
     enviarAmazon(pedido.produto).then(responder);
     return true;
   }
+  if (pedido?.tipo === "amazonLista") {
+    enviarAmazonLista(pedido.produtos).then(responder);
+    return true;
+  }
   return false;
 });

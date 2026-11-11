@@ -258,7 +258,7 @@ const STORE_HELP: Record<string, { auto: boolean; time: string; portal?: [string
       "Tenha conta no **Amazon Associados**: https://associados.amazon.com.br",
       "Copie a sua **Partner Tag** (termina em **-20**, ex.: suaconta-20). Também serve colar um link seu com tag=.",
       "Aqui, cole a tag, marque **Publicar esta loja** e salve. Pronto: o robô publica sozinho as promoções da Amazon que o Achadinhos acompanha o dia todo, sempre com a sua tag. Não precisa de PC nem de celular.",
-      "Opcional, para escolher produtos você mesmo:\n- **Pela extensão:** com a extensão do Achadinhos (página **Automação**), abra a página de um produto da Amazon e clique em **Enviar ao Achadinhos**. Ele entra na frente da fila por **24 h**.\n- **Colando links:** em **Links dos produtos**, um por linha: **link | nome | preço** (link da página ou o curto **amzn.to** da SiteStripe).",
+      "Opcional, para escolher produtos você mesmo:\n- **Um produto:** com a extensão do Achadinhos (página **Automação**), abra a página de um produto da Amazon e clique em **Enviar ao Achadinhos**.\n- **Uma página inteira:** nas listas de **Mais vendidos** da Amazon (https://www.amazon.com.br/gp/bestsellers), clique em **Enviar todos ao Achadinhos**. Vão até 50 produtos de uma vez.\n- Os produtos ficam **24 h** na fila (até 500) e saem **alternados** com as promoções automáticas.\n- **Colando links:** em **Links dos produtos**, um por linha: **link | nome | preço** (link da página ou o curto **amzn.to** da SiteStripe).",
       "Atenção: a Amazon cancela o cadastro de associado se nenhum link seu gerar um pedido em **180 dias**."
     ]
   },

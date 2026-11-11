@@ -53,6 +53,29 @@ export const spreadByType = <T extends { title: string; category?: string }>(ite
   return out.map(entry => entry.item);
 };
 
+/**
+ * Alterna as origens (ex.: produtos que a empresa mandou e promoções automáticas dos canais), mantendo a ordem
+ * dentro de cada origem. Sem isto, os produtos da extensão (com "de/por", pontuação maior) ganhavam sempre e as
+ * promoções dos canais nunca saíam (0 envios em 24 h na empresa 1, 11/11/2026). Exportada para teste.
+ */
+export const interleaveBy = <T>(items: T[], originOf: (item: T) => string): T[] => {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const key = originOf(item);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  }
+  const lists = [...groups.values()];
+  const out: T[] = [];
+  for (let index = 0; out.length < items.length; index += 1) {
+    for (const list of lists) if (index < list.length) out.push(list[index]);
+  }
+  return out;
+};
+
+/** Origem da oferta para a alternância: o que a empresa escolheu (extensão, link colado) ou o que o robô achou. */
+export const offerOrigin = (offer: { category?: string }) =>
+  ["extensão", "link"].includes(String(offer.category || "")) ? "empresa" : "automática";
+
 /** Sorteio sem reposição proporcional ao peso (corrida exponencial). Exportada para teste. */
 export const varietyOrder = <T>(items: T[], weightOf: (item: T) => number, rand: () => number = Math.random): T[] =>
   items

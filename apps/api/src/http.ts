@@ -22,7 +22,7 @@ import { DAY_START, readPostFilter } from "./deals/postFilter";
 import { countsAsClick, isClickToken, redirectTarget } from "./deals/trackedLink";
 import { channelList } from "./deals/telegramSources";
 import { cadenceWithStore, listWithStore } from "./deals/storeRollout";
-import { AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, amazonQueueOffer, readAmazonItem } from "./deals/amazonExtension";
+import { AMAZON_BATCH_MAX, AMAZON_ITEM_HOURS, AMAZON_QUEUE_MAX, amazonQueueOffer, readAmazonItem } from "./deals/amazonExtension";
 import { hashExtensionKey, isMlSessionCookie, looksLikeExtensionKey, newExtensionKey } from "./deals/extensionKey";
 
 export type AuthUser = {
@@ -993,41 +993,84 @@ app.post("/api/extension/ml-cookie", async (req, res, next) => {
 });
 
 // Botão "Enviar ao Achadinhos" na página do produto da Amazon: entra na fila da empresa por 24 h.
-app.post("/api/extension/amazon-item", async (req, res, next) => {
-  try {
-    const ipKey = `ext-amazon:${ipOf(req)}`;
-    if (limited(ipKey, 120, 10 * 60_000)) return res.status(429).json({ error: "Muitos envios. Tente de novo em alguns minutos." });
-    hit(ipKey);
-    const key = String(req.headers["x-achadinhos-key"] || "");
-    if (!looksLikeExtensionKey(key)) return res.status(401).json({ error: "Chave da extensão inválida. Gere outra no painel." });
-    const row = await one<{ company_id: number }>("SELECT company_id FROM settings WHERE ext_key_hash = $1", [hashExtensionKey(key)]);
-    if (!row) return res.status(401).json({ error: "Chave da extensão inválida. Gere outra no painel." });
-    const item = readAmazonItem(req.body);
-    if (!item) return res.status(400).json({ error: "Não consegui ler o produto (ASIN, nome ou preço). Abra a página do produto e tente de novo." });
-    const store = await one<{ enabled: boolean; public_config: Record<string, string> | null }>(
-      "SELECT enabled, public_config FROM stores WHERE company_id = $1 AND marketplace = 'amazon'",
-      [row.company_id]
-    );
-    if (!store?.enabled || !String(store.public_config?.partnerTag || "").trim()) {
-      return res.status(400).json({ error: "Ative a Amazon em Lojas e salve a sua Partner Tag (termina em -20) antes de enviar produtos." });
-    }
-    const [{ count }] = await q<{ count: string }>(
-      "SELECT count(*)::text AS count FROM extension_offers WHERE company_id = $1 AND marketplace = 'amazon' AND expires_at > now() AND external_id <> $2",
-      [row.company_id, item.asin]
-    );
-    if (Number(count) >= AMAZON_QUEUE_MAX) return res.status(400).json({ error: `A fila já tem ${AMAZON_QUEUE_MAX} produtos válidos. Espere alguns saírem.` });
+/** Chave da extensão -> empresa com a Amazon pronta para receber produtos; null quando já respondeu com erro. */
+const amazonExtensionCompany = async (req: Request, res: Response, limit: number): Promise<number | null> => {
+  const ipKey = `ext-amazon:${ipOf(req)}`;
+  if (limited(ipKey, limit, 10 * 60_000)) {
+    res.status(429).json({ error: "Muitos envios. Tente de novo em alguns minutos." });
+    return null;
+  }
+  hit(ipKey);
+  const key = String(req.headers["x-achadinhos-key"] || "");
+  const row = looksLikeExtensionKey(key) ? await one<{ company_id: number }>("SELECT company_id FROM settings WHERE ext_key_hash = $1", [hashExtensionKey(key)]) : null;
+  if (!row) {
+    res.status(401).json({ error: "Chave da extensão inválida. Gere outra no painel." });
+    return null;
+  }
+  const store = await one<{ enabled: boolean; public_config: Record<string, string> | null }>(
+    "SELECT enabled, public_config FROM stores WHERE company_id = $1 AND marketplace = 'amazon'",
+    [row.company_id]
+  );
+  if (!store?.enabled || !String(store.public_config?.partnerTag || "").trim()) {
+    res.status(400).json({ error: "Ative a Amazon em Lojas e salve a sua Partner Tag (termina em -20) antes de enviar produtos." });
+    return null;
+  }
+  return row.company_id;
+};
+
+/** Põe produtos na fila da empresa por AMAZON_ITEM_HOURS, até AMAZON_QUEUE_MAX válidos. Produto que já está na fila é renovado. */
+const queueAmazonItems = async (companyId: number, items: Array<ReturnType<typeof readAmazonItem>>) => {
+  const valid = items.filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const existing = new Set((await q<{ external_id: string }>(
+    "SELECT external_id FROM extension_offers WHERE company_id = $1 AND marketplace = 'amazon' AND expires_at > now()",
+    [companyId]
+  )).map(row => row.external_id));
+  let room = AMAZON_QUEUE_MAX - existing.size;
+  let added = 0;
+  for (const item of valid) {
+    const renewing = existing.has(item.asin);
+    if (!renewing && room <= 0) continue;
     await q(
       `INSERT INTO extension_offers (company_id, marketplace, external_id, title, price_cents, original_price_cents, image_url, expires_at)
        VALUES ($1, 'amazon', $2, $3, $4, $5, $6, now() + make_interval(hours => $7))
        ON CONFLICT (company_id, marketplace, external_id) DO UPDATE SET title = EXCLUDED.title, price_cents = EXCLUDED.price_cents,
          original_price_cents = EXCLUDED.original_price_cents, image_url = EXCLUDED.image_url, expires_at = EXCLUDED.expires_at, created_at = now()`,
-      [row.company_id, item.asin, item.title, item.priceCents, item.originalPriceCents, item.imageUrl, AMAZON_ITEM_HOURS]
+      [companyId, item.asin, item.title, item.priceCents, item.originalPriceCents, item.imageUrl, AMAZON_ITEM_HOURS]
     );
-    const [{ active }] = await q<{ active: string }>(
-      "SELECT count(*)::text AS active FROM extension_offers WHERE company_id = $1 AND marketplace = 'amazon' AND expires_at > now()",
-      [row.company_id]
-    );
-    res.json({ ok: true, queued: Number(active), hours: AMAZON_ITEM_HOURS });
+    if (!renewing) {
+      room -= 1;
+      existing.add(item.asin);
+    }
+    added += 1;
+  }
+  return { added, queued: existing.size, full: room <= 0 };
+};
+
+app.post("/api/extension/amazon-item", async (req, res, next) => {
+  try {
+    const companyId = await amazonExtensionCompany(req, res, 120);
+    if (companyId === null) return;
+    const item = readAmazonItem(req.body);
+    if (!item) return res.status(400).json({ error: "Não consegui ler o produto (ASIN, nome ou preço). Abra a página do produto e tente de novo." });
+    const result = await queueAmazonItems(companyId, [item]);
+    if (!result.added) return res.status(400).json({ error: `A fila já tem ${AMAZON_QUEUE_MAX} produtos válidos. Espere alguns saírem.` });
+    res.json({ ok: true, queued: result.queued, hours: AMAZON_ITEM_HOURS });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Botão "Enviar todos" nas listas da Amazon (mais vendidos etc.): a página inteira num envio.
+app.post("/api/extension/amazon-items", async (req, res, next) => {
+  try {
+    const companyId = await amazonExtensionCompany(req, res, 60);
+    if (companyId === null) return;
+    const raw: unknown[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, AMAZON_BATCH_MAX) : [];
+    const items = raw.map(entry => readAmazonItem(entry));
+    if (!items.some(Boolean)) return res.status(400).json({ error: "Não consegui ler nenhum produto desta página." });
+    const result = await queueAmazonItems(companyId, items);
+    if (!result.added) return res.status(400).json({ error: `A fila já tem ${AMAZON_QUEUE_MAX} produtos válidos. Espere alguns saírem.` });
+    res.json({ ok: true, added: result.added, queued: result.queued, full: result.full, hours: AMAZON_ITEM_HOURS });
   } catch (err) {
     next(err);
   }

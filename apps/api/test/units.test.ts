@@ -251,6 +251,18 @@ test("Mercado Livre API oficial: mais vendidos viram ofertas com nome, foto, lin
   assert.equal(asked.includes("/products/MLB55762063"), false, "sem desconto, não gasta chamada buscando nome e foto");
 });
 
+test("Amazon: alterna produtos da empresa com as promoções automáticas dos canais", async () => {
+  const { interleaveBy, offerOrigin } = await import("../src/deals/variety");
+  // Situação real de 11/11/2026: 19 produtos da extensão na frente e 28 dos canais sem vez nenhuma.
+  const minhas = ["A", "B", "C"].map(title => ({ title, category: "extensão" }));
+  const canais = ["x", "y"].map(title => ({ title, category: "" }));
+  assert.deepEqual(interleaveBy([...minhas, ...canais], offerOrigin).map(item => item.title), ["A", "x", "B", "y", "C"]);
+  assert.equal(offerOrigin({ category: "link" }), "empresa", "link colado também é escolha da empresa");
+  assert.equal(offerOrigin({ category: "Casa, Móveis e Decoração" }), "automática");
+  assert.deepEqual(interleaveBy(canais, offerOrigin), canais, "uma origem só: nada muda");
+  assert.deepEqual(interleaveBy([], offerOrigin), []);
+});
+
 test("ofertas do mesmo tipo não saem em sequência", async () => {
   const { productTypeKeys, spreadByType } = await import("../src/deals/variety");
   assert.deepEqual(productTypeKeys({ title: "Fone de Ouvido Bluetooth JBL Tune 520BT", category: "Eletrônicos, Áudio e Vídeo > Fones" }), ["cat:eletronicos, audio e video", "word:fone"]);
