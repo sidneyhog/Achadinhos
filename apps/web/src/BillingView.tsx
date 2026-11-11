@@ -4,7 +4,8 @@ import { api } from "./api";
 type Invoice = { id: number; amountCents: number; cycle: string; status: string; provider: string; qrText: string; qrImage: string; expiresAt: string | null; paidAt: string | null };
 type Billing = {
   provider: "pagbank" | "efi" | null;
-  plan: { name: string; prices: Record<string, number | null> };
+  plan: { slug: string; name: string; prices: Record<string, number | null> };
+  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null> }>;
   subscription: { status: string; cycle: string | null; trialEndsAt: string | null; currentPeriodEnd: string | null; companyStatus: string };
   taxIdHint: string;
   open: Invoice | null;
@@ -20,6 +21,7 @@ const cycleName = (id?: string | null) => CYCLES.find(([key]) => key === id)?.[1
 export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; tell: (title: string, text: string, tone?: "ok" | "bad") => void }) {
   const [data, setData] = useState<Billing | null>(null);
   const [cycle, setCycle] = useState("monthly");
+  const [planSlug, setPlanSlug] = useState("");
   const [coupon, setCoupon] = useState("");
   const [taxId, setTaxId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -33,6 +35,7 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
     setData(next);
     if (next.open) setInvoice((current) => current || next.open);
     if (next.subscription.cycle && next.plan.prices[next.subscription.cycle] != null) setCycle(next.subscription.cycle);
+    setPlanSlug((current) => current || next.plan.slug);
     return next;
   };
   useEffect(() => { load().catch((err) => tell("Não carregou", err instanceof Error ? err.message : "Falha", "bad")); }, []);
@@ -68,7 +71,7 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   const pay = async () => {
     setBusy(true);
     try {
-      const result = await api<{ configured: boolean; message?: string; invoice?: Invoice }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId }) });
+      const result = await api<{ configured: boolean; message?: string; invoice?: Invoice }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId, planSlug }) });
       if (!result.configured) { tell("Pagamento", result.message || "O pagamento online ainda não está ativo.", "bad"); return; }
       if (result.invoice) { setInvoice(result.invoice); setPaidUntil(null); }
     } catch (err) {
@@ -95,6 +98,16 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   const statusText = sub.companyStatus === "suspended" ? "Suspensa: pague para voltar a publicar" : sub.status === "trialing" ? (late ? "Teste encerrado" : "Teste grátis") : sub.status === "active" ? (late ? "Vencida" : "Ativa") : "Cancelada";
   const left = invoice?.expiresAt ? Math.max(0, Math.floor((new Date(invoice.expiresAt).getTime() - now) / 1000)) : 0;
   const expired = invoice?.status === "expired" || (invoice?.status === "pending" && invoice.expiresAt && left === 0);
+  // Plano escolhido na hora de pagar: o Pix sai com o preço dele, e a troca só vale quando o pagamento é confirmado.
+  const chosen = data.plans?.find((plan) => plan.slug === planSlug) || { ...data.plan, maxGroups: null, maxConnections: null };
+  const changing = chosen.slug !== data.plan.slug;
+  const limits = (plan: { maxGroups: number | null; maxConnections: number | null }) =>
+    [plan.maxGroups == null ? "grupos sem limite" : `${plan.maxGroups} grupo${plan.maxGroups === 1 ? "" : "s"}`, plan.maxConnections == null ? "conexões sem limite" : `${plan.maxConnections} conex${plan.maxConnections === 1 ? "ão" : "ões"}`].join(" · ");
+  const pickPlan = (slug: string) => {
+    setPlanSlug(slug);
+    const prices = data.plans?.find((plan) => plan.slug === slug)?.prices || {};
+    if (prices[cycle] == null) setCycle(CYCLES.find(([key]) => prices[key] != null)?.[0] || "monthly");
+  };
 
   return (
     <section className="aff-block" style={{ maxWidth: 560 }}>
@@ -130,9 +143,17 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
         ) : (
           <article className="aff-pref">
             {expired ? <p className="aff-config-error">⏱️ Esse Pix expirou sem pagamento. Gere um novo abaixo.</p> : null}
+            {data.plans && data.plans.length > 1 ? (
+              <label>Plano
+                <select value={chosen.slug} onChange={(event) => pickPlan(event.target.value)}>
+                  {data.plans.map((plan) => <option key={plan.slug} value={plan.slug}>{plan.name}{plan.slug === data.plan.slug ? " (atual)" : ""} · {limits(plan)}</option>)}
+                </select>
+              </label>
+            ) : null}
+            {changing ? <small>Você vai mudar do plano <b>{data.plan.name}</b> para <b>{chosen.name}</b>. A troca vale assim que o Pix for confirmado.</small> : null}
             <label>Período
               <select value={cycle} onChange={(event) => setCycle(event.target.value)}>
-                {CYCLES.filter(([key]) => data.plan.prices[key] != null).map(([key, label]) => <option key={key} value={key}>{label} · {money(Number(data.plan.prices[key]))}</option>)}
+                {CYCLES.filter(([key]) => chosen.prices[key] != null).map(([key, label]) => <option key={key} value={key}>{label} · {money(Number(chosen.prices[key]))}</option>)}
               </select>
             </label>
             {data.provider === "pagbank" ? (

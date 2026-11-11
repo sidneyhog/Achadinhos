@@ -2105,11 +2105,24 @@ const PIX_MINUTES = 30;
 
 type CheckoutSub = { plan_id: number; slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; name: string; plan_name: string; tax_id: string };
 
-const loadCheckoutSub = (companyId: number) => one<CheckoutSub>(
-  `SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name, p.name AS plan_name, c.tax_id
-   FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
-  [companyId]
-);
+/**
+ * Assinatura para cobrar. Com `planSlug` de outro plano ativo, os preços e o plan_id vêm desse plano: o cliente troca de
+ * plano na hora de pagar, e a troca só vale quando o pagamento é confirmado (settleInvoice). Plano inexistente -> null.
+ */
+const loadCheckoutSub = async (companyId: number, planSlug?: unknown): Promise<CheckoutSub | null> => {
+  const sub = await one<CheckoutSub>(
+    `SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name, p.name AS plan_name, c.tax_id
+     FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
+    [companyId]
+  );
+  const slug = String(planSlug || "").trim();
+  if (!sub || !slug || slug === sub.slug) return sub;
+  const plan = await one<Pick<CheckoutSub, "plan_id" | "slug" | "monthly_cents" | "quarterly_cents" | "semiannual_cents" | "yearly_cents" | "plan_name">>(
+    "SELECT id AS plan_id, slug, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents, name AS plan_name FROM plans WHERE slug = $1 AND active = true",
+    [slug]
+  );
+  return plan ? { ...sub, ...plan } : null;
+};
 
 const cyclePrice = (sub: CheckoutSub, cycle: string) =>
   ({ monthly: sub.monthly_cents, quarterly: sub.quarterly_cents, semiannual: sub.semiannual_cents, yearly: sub.yearly_cents } as Record<string, number | null>)[cycle] ?? null;
@@ -2190,13 +2203,16 @@ app.get("/api/billing", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const pag = await loadPagbank();
     const provider = pag.active && pag.token ? "pagbank" : (await efiConfigured()) ? "efi" : null;
-    const sub = await one<{ status: string; cycle: string | null; trial_ends_at: string | null; current_period_end: string | null; company_status: string; tax_id: string; plan_name: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
-      `SELECT s.status, s.cycle, s.trial_ends_at, s.current_period_end, c.status AS company_status, c.tax_id, p.name AS plan_name,
+    const sub = await one<{ status: string; cycle: string | null; trial_ends_at: string | null; current_period_end: string | null; company_status: string; tax_id: string; plan_name: string; plan_slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
+      `SELECT s.status, s.cycle, s.trial_ends_at, s.current_period_end, c.status AS company_status, c.tax_id, p.name AS plan_name, p.slug AS plan_slug,
               p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents
        FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
       [companyId]
     );
     if (!sub) return res.status(404).json({ error: "Sem assinatura" });
+    const plans = await q<{ slug: string; name: string; max_groups: number | null; max_connections: number | null; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
+      "SELECT slug, name, max_groups, max_connections, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents FROM plans WHERE active = true ORDER BY sort_order, monthly_cents"
+    );
     const open = await one<Parameters<typeof invoiceView>[0]>(
       `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND status = 'pending' AND provider = 'pagbank' AND expires_at > now() ORDER BY id DESC LIMIT 1`,
       [companyId]
@@ -2209,9 +2225,17 @@ app.get("/api/billing", auth, async (req, res, next) => {
     res.json({
       provider,
       plan: {
+        slug: sub.plan_slug,
         name: sub.plan_name,
         prices: { monthly: sub.monthly_cents, quarterly: sub.quarterly_cents, semiannual: sub.semiannual_cents, yearly: sub.yearly_cents }
       },
+      plans: plans.map(plan => ({
+        slug: plan.slug,
+        name: plan.name,
+        maxGroups: plan.max_groups,
+        maxConnections: plan.max_connections,
+        prices: { monthly: plan.monthly_cents, quarterly: plan.quarterly_cents, semiannual: plan.semiannual_cents, yearly: plan.yearly_cents }
+      })),
       subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status },
       taxIdHint: digits ? `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}` : "",
       open: open ? invoiceView(open) : null,
@@ -2260,8 +2284,8 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
     const method = usePagbank ? "pix" : String(req.body?.method || "pix");
     if (!["pix", "card", "boleto"].includes(method)) return res.status(400).json({ error: "Método inválido" });
     const cycle = CYCLE_DAYS[String(req.body?.cycle)] ? String(req.body.cycle) : "monthly";
-    const sub = await loadCheckoutSub(companyId);
-    if (!sub) return res.status(404).json({ error: "Sem assinatura" });
+    const sub = await loadCheckoutSub(companyId, req.body?.planSlug);
+    if (!sub) return res.status(req.body?.planSlug ? 400 : 404).json({ error: req.body?.planSlug ? "Plano não encontrado" : "Sem assinatura" });
     const price = cyclePrice(sub, cycle);
     if (price == null) return res.status(400).json({ error: "Esse ciclo não tem preço neste plano" });
     let quote;
@@ -2277,8 +2301,8 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
       if (taxId.length !== 11 && taxId.length !== 14) return res.status(400).json({ error: "Informe o CPF ou CNPJ de quem paga" });
       // Mesmo plano, ciclo e valor com um Pix ainda válido: reaproveita, em vez de criar outro pedido.
       const open = await one<Parameters<typeof invoiceView>[0]>(
-        `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND provider = 'pagbank' AND status = 'pending' AND cycle = $2 AND amount_cents = $3 AND expires_at > now() + interval '3 minutes' ORDER BY id DESC LIMIT 1`,
-        [companyId, cycle, quote.amount]
+        `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND provider = 'pagbank' AND status = 'pending' AND cycle = $2 AND amount_cents = $3 AND plan_id = $4 AND expires_at > now() + interval '3 minutes' ORDER BY id DESC LIMIT 1`,
+        [companyId, cycle, quote.amount, sub.plan_id]
       );
       if (open) return res.json({ configured: true, provider: "pagbank", invoice: invoiceView(open) });
       try {
@@ -2408,18 +2432,19 @@ const PARTNER_COMMISSION_SQL = `
  */
 const settleInvoice = async (invoiceId: number, payload: unknown) => {
   const applied = await withTransaction(async tx => {
-    const inv = await tx.one<{ id: number; company_id: number; cycle: string }>(
-      "UPDATE invoices SET status = 'paid', paid_at = now() WHERE id = $1 AND status <> 'paid' RETURNING id, company_id, cycle",
+    const inv = await tx.one<{ id: number; company_id: number; cycle: string; plan_id: number | null }>(
+      "UPDATE invoices SET status = 'paid', paid_at = now() WHERE id = $1 AND status <> 'paid' RETURNING id, company_id, cycle, plan_id",
       [invoiceId]
     );
     if (!inv) return null;
     const days = CYCLE_DAYS[inv.cycle] || 30;
     await tx.q(
-      `UPDATE subscriptions SET status = 'active', cycle = $3,
+      // plan_id da fatura: o plano escolhido na hora de pagar passa a valer só agora, com o pagamento confirmado.
+      `UPDATE subscriptions SET status = 'active', cycle = $3, plan_id = coalesce($4, plan_id),
          current_period_end = GREATEST(now(), coalesce(current_period_end, now()), CASE WHEN status = 'trialing' THEN coalesce(trial_ends_at, now()) ELSE now() END) + ($2 || ' days')::interval,
          updated_at = now()
        WHERE company_id = $1`,
-      [inv.company_id, String(days), inv.cycle]
+      [inv.company_id, String(days), inv.cycle, inv.plan_id]
     );
     await tx.q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [inv.company_id]);
     await tx.q("INSERT INTO payment_events (company_id, invoice_id, kind, payload) VALUES ($1,$2,'paid',$3::jsonb)", [inv.company_id, inv.id, JSON.stringify(payload ?? {})]);
