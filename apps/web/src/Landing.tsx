@@ -16,6 +16,10 @@ type Plan = {
 type Quote = { id: number; author: string; company: string; quote: string };
 
 const money = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+/** WhatsApp de contato e suporte (botão flutuante e "Contato" do rodapé). Para trocar o número, é só aqui. */
+const SUPPORT_WHATSAPP = "5519997339377";
+const supportLink = (text: string) => `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(text)}`;
+const SALES_TEXT = "Olá! Vim pelo site do Achadinhos e quero saber mais.";
 const linesOf = (value: string) => value.split("\n").map((line) => line.trim()).filter(Boolean);
 const cap = (value: number | null, one: string, many: string) => (value == null ? `${many} sem limite` : value === 1 ? `1 ${one}` : `${value} ${many}`);
 
@@ -144,9 +148,9 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
                 <span><i />Automação ativa</span>
               </header>
               <div className="land-mock__stats">
-                <article><small>Ofertas enviadas hoje</small><b>247</b></article>
-                <article><small>Cliques nos links</small><b>1.284</b></article>
-                <article><small>Grupos ativos</small><b>12</b></article>
+                <article><small>Ofertas enviadas hoje</small><b>1.086</b></article>
+                <article><small>Cliques nos links</small><b>3.412</b></article>
+                <article><small>Grupos ativos</small><b>24</b></article>
               </div>
               <p>Últimas ofertas</p>
               <div className="land-offer">
@@ -160,7 +164,7 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
                 <small>Amazon</small>
               </div>
             </div>
-            <div className="land-toast"><Icon d={icons.check} />Preço conferido · oferta enviada para 12 grupos</div>
+            <div className="land-toast"><Icon d={icons.check} />Preço conferido · oferta enviada para 24 grupos</div>
           </div>
         </div>
       </section>
@@ -254,10 +258,11 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
         <div className="land-wrap land-split land-reveal">
           <div className="land-board" aria-hidden="true">
             <header><strong>Painel</strong><span>Hoje</span></header>
-            <div className="land-board__row"><i className="is-on" />WhatsApp conectado<small>12 grupos</small></div>
-            <div className="land-board__row"><i className="is-on" />Mercado Livre<small>42 ofertas hoje</small></div>
-            <div className="land-board__row"><i className="is-on" />Status do WhatsApp<small>8 publicações</small></div>
-            <div className="land-board__row"><i />Amazon<small>próximo lote 14h</small></div>
+            <div className="land-board__row"><i className="is-on" />WhatsApp conectado<small>24 grupos · 2 números</small></div>
+            <div className="land-board__row"><i className="is-on" />Mercado Livre<small>612 ofertas hoje</small></div>
+            <div className="land-board__row"><i className="is-on" />Status do WhatsApp<small>96 publicações</small></div>
+            <div className="land-board__row"><i className="is-on" />Amazon<small>184 ofertas hoje</small></div>
+            <div className="land-board__row"><i className="is-on" />Shopee<small>142 ofertas hoje</small></div>
             <div className="land-board__bars"><span style={{ height: "46%" }} /><span style={{ height: "72%" }} /><span style={{ height: "58%" }} /><span style={{ height: "88%" }} /><span style={{ height: "64%" }} /></div>
           </div>
           <div>
@@ -385,7 +390,7 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
           </div>
           <div>
             <b>Empresa</b>
-            <button type="button" onClick={() => setLegal("contato")}>Contato</button>
+            <a href={supportLink(SALES_TEXT)} target="_blank" rel="noopener noreferrer">Contato pelo WhatsApp</a>
             <button type="button" onClick={() => setLegal("termos")}>Termos de Uso</button>
             <button type="button" onClick={() => setLegal("privacidade")}>Política de Privacidade</button>
           </div>
@@ -403,12 +408,16 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
             ) : legal === "privacidade" ? (
               <p>Cada empresa acessa somente os próprios grupos, contatos, lojas e credenciais. Esses dados não são exibidos para as outras contas da plataforma.</p>
             ) : (
-              <p>O canal de contato desta instalação fica com quem liberou o seu acesso. Crie a conta para começar o teste do plano publicado.</p>
+              <p>Fale com a gente pelo WhatsApp: <a href={supportLink(SALES_TEXT)} target="_blank" rel="noopener noreferrer">(19) 99733-9377</a>.</p>
             )}
           </div>
         ) : null}
         <div className="land-wrap land-copyline">© {new Date().getFullYear()} Achadinhos. Todos os direitos reservados.</div>
       </footer>
+      <a className="land-whats" href={supportLink(SALES_TEXT)} target="_blank" rel="noopener noreferrer" aria-label="Falar no WhatsApp">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 11.9 11.9 0 0 0 4.6 4c1.7.7 2.4.8 3.2.7a2.8 2.8 0 0 0 1.8-1.3 2.3 2.3 0 0 0 .2-1.3c-.1-.1-.2-.2-.4-.3Z" /></svg>
+        <span>Fale com a gente</span>
+      </a>
     </div>
   );
 }

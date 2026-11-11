@@ -1771,3 +1771,9 @@ button.land-brand { background: none; border: 0; padding: 0; cursor: pointer; fo
 .aff-shop em.is-soon { background: #fef3c7; color: #92400e; }
 .aff-shop.is-soon p { margin-top: 8px; color: var(--muted); font-size: 13px; }
 .aff-pill.is-soon { background: #fef3c7; color: #92400e; }
+
+/* Botão flutuante do WhatsApp (contato e suporte) na página inicial. */
+.land-whats { position: fixed; right: 20px; bottom: 20px; z-index: 50; display: inline-flex; align-items: center; gap: 10px; padding: 12px 18px 12px 14px; border-radius: 999px; background: #25d366; color: #fff; font-weight: 700; text-decoration: none; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); transition: transform .2s ease; }
+.land-whats:hover { transform: translateY(-2px); }
+.land-whats svg { width: 26px; height: 26px; fill: #fff; }
+@media (max-width: 640px) { .land-whats { padding: 14px; right: 16px; bottom: 16px; } .land-whats span { display: none; } }
