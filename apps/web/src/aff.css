@@ -1583,6 +1583,17 @@ button.land-brand { background: none; border: 0; padding: 0; cursor: pointer; fo
 .land-stores img { width: 36px; height: 36px; object-fit: contain; }
 .land-stores strong { display: block; }
 .land-stores span { display: inline-flex; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 700; }
+/* Lojas ainda em validação: aparecem, mas apagadas e com selo "Em breve". */
+.land-stores article.is-soon { opacity: .7; }
+.land-stores article.is-soon img { filter: grayscale(1); }
+.land-stores article.is-soon span { background: #f1f5f9; color: #64748b; }
+/* Comparação "na mão x Achadinhos" em fundo claro: a .land-list padrão é feita para o fundo escuro do topo. */
+.land-compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.land-compare .land-list { flex-direction: column; align-items: flex-start; gap: 10px; color: #475569; margin-top: 14px; }
+.land-compare article.is-good { border-color: #a5b4fc; box-shadow: 0 16px 40px rgba(79, 70, 229, .08); }
+.land-compare article.is-good .land-list { color: #1e293b; font-weight: 600; }
+.land-compare article.is-good svg { color: #4f46e5; }
+@media (max-width: 720px) { .land-compare { grid-template-columns: 1fr; } }
 .land-spot { background: radial-gradient(circle at 15% 20%, rgba(99, 102, 241, .35), transparent 28%), #0b1020; color: #f8fafc; padding: 104px 0; }
 .land-spot p { max-width: 560px; }
 .land-list { display: grid; gap: 10px; }

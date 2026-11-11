@@ -20,24 +20,26 @@ const linesOf = (value: string) => value.split("\n").map((line) => line.trim()).
 const cap = (value: number | null, one: string, many: string) => (value == null ? `${many} sem limite` : value === 1 ? `1 ${one}` : `${value} ${many}`);
 
 const stores = [
-  ["ml", "Mercado Livre"],
-  ["shopee", "Shopee"],
-  ["amazon", "Amazon"],
-  ["aliexpress", "AliExpress"],
-  ["awin", "Awin"],
-  ["rakuten", "Rakuten"],
-  ["epoca", "Época Cosméticos"]
+  ["ml", "Mercado Livre", true],
+  ["amazon", "Amazon", true],
+  ["shopee", "Shopee", true],
+  ["magalu", "Magalu", true],
+  ["aliexpress", "AliExpress", false],
+  ["awin", "Casas Bahia, Natura e +", false],
+  ["rakuten", "Rakuten", false],
+  ["epoca", "Época Cosméticos", false]
 ] as const;
 
 const faqs = [
-  ["Preciso deixar meu computador ligado?", "Não. A publicação continua na plataforma, mesmo com o seu computador desligado."],
-  ["Posso usar vários grupos?", "Sim. Cada grupo pode receber lojas, categorias e horários diferentes."],
-  ["Posso pausar a automação?", "Sim. Você pausa quando quiser e volta a publicar sem montar tudo de novo."],
-  ["Minha conta é separada das outras empresas?", "Sim. Cada empresa enxerga apenas os próprios grupos, lojas e credenciais."],
-  ["Quais lojas são suportadas?", "Mercado Livre, Shopee, Amazon, AliExpress, Awin, Rakuten e Época Cosméticos."],
-  ["Posso escolher quais categorias serão enviadas?", "Sim. Você define o tipo de produto que cada grupo deve receber."],
-  ["A mesma oferta pode ser enviada várias vezes?", "O Achadinhos segura a repetição pelo período que você definir na automação."],
-  ["Como funciona o teste grátis?", "A conta já entra no período de teste do plano escolhido. O cartão não é pedido para começar."]
+  ["Preciso deixar o computador ou o celular ligado?", "Não. O robô roda nos nossos servidores, 24 horas por dia. Você configura uma vez e acompanha pelo painel quando quiser, até pelo celular."],
+  ["A comissão é minha mesmo?", "Sim. Cada oferta sai com o seu código de afiliado (a sua etiqueta do Mercado Livre, a sua tag da Amazon, a sua conta da Shopee e a sua loja do Magalu). A comissão cai direto na sua conta de cada loja."],
+  ["Quais lojas posso usar?", "Mercado Livre, Amazon, Shopee e Magalu já estão liberadas. AliExpress, Casas Bahia, Natura, Rakuten e Época Cosméticos estão em fase final de testes e chegam em breve."],
+  ["O preço publicado é confiável?", "No Mercado Livre o robô usa a API oficial e confere o preço do anúncio no momento do envio: se o desconto acabou, a oferta não sai. Só publicamos produto com preço antigo maior que o atual."],
+  ["Posso publicar no Status do WhatsApp e no Telegram?", "Sim. Além dos grupos, o Achadinhos publica no Status do WhatsApp e em grupos e canais do Telegram, cada um com o próprio ritmo e as próprias lojas."],
+  ["Vai repetir sempre as mesmas ofertas?", "Não. O mesmo produto (ou uma variação dele) não volta ao mesmo grupo por 72 horas, e o robô intercala os tipos de produto para não mandar três air fryers seguidas."],
+  ["Corro risco de ter o número bloqueado?", "Você controla o ritmo de cada loja, quantas ofertas por vez e os horários. Se o número for removido de um grupo, o robô desliga aquele grupo sozinho. Recomendamos usar um número só para o robô e grupos que aceitam divulgação."],
+  ["Como funciona o teste grátis e o pagamento?", "A conta começa com dias grátis no plano escolhido, sem pagar nada. Depois, você paga por Pix (mensal, trimestral, semestral ou anual) e a liberação é na hora. Dá para trocar de plano na própria tela de pagamento."],
+  ["Posso cancelar quando quiser?", "Sim. Não há fidelidade nem multa: é só não renovar."]
 ];
 
 const Icon = ({ d }: { d: string }) => (
@@ -85,6 +87,13 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
   }, [plansReady, plans.length, quotes.length, legal]);
 
   const start = (slug?: string) => onRegister(slug || plans[0]?.slug || "");
+  const trialDays = Math.max(0, ...plans.map((plan) => Number(plan.trial_days) || 0));
+  // Desconto do anual frente a 12 mensalidades, para destacar no card do plano.
+  const yearlySaving = (plan: Plan) => {
+    if (!plan.monthly_cents || !plan.yearly_cents) return 0;
+    const saving = Math.round((1 - plan.yearly_cents / (plan.monthly_cents * 12)) * 100);
+    return saving >= 5 ? saving : 0;
+  };
   const closeMenu = () => setMenu(false);
 
   return (
@@ -115,17 +124,17 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
         <div className="land-glow" aria-hidden="true" />
         <div className="land-wrap land-hero__grid">
           <div className="land-hero__copy">
-            <p className="land-kicker">Automação para afiliados</p>
-            <h1>Transforme seus grupos do WhatsApp em uma máquina de ofertas.</h1>
-            <p>Encontre promoções, aplique seus links de afiliado e publique automaticamente nos seus grupos — enquanto o Achadinhos trabalha por você.</p>
+            <p className="land-kicker">Robô de ofertas para afiliados</p>
+            <h1>Seus grupos de ofertas publicando sozinhos, 24 horas por dia.</h1>
+            <p>O Achadinhos garimpa promoções com desconto de verdade no Mercado Livre, na Amazon, na Shopee e no Magalu, coloca o seu link de afiliado e publica nos seus grupos do WhatsApp, no Status e no Telegram. Você só acompanha as comissões.</p>
             <div className="land-actions">
-              <button type="button" className="land-btn is-primary" onClick={() => start()}>Começar grátis</button>
+              <button type="button" className="land-btn is-primary" onClick={() => start()}>{trialDays ? `Testar ${trialDays} dias grátis` : "Começar agora"}</button>
               <a className="land-btn is-ghost" href="#como">Ver como funciona</a>
             </div>
             <ul className="land-checks">
-              <li><Icon d={icons.check} />Teste grátis</li>
-              <li><Icon d={icons.check} />Sem cartão para começar</li>
-              <li><Icon d={icons.check} />Cancele quando quiser</li>
+              <li><Icon d={icons.check} />{trialDays ? `${trialDays} dias grátis` : "Teste grátis"}</li>
+              <li><Icon d={icons.check} />Sem cartão: pague por Pix depois</li>
+              <li><Icon d={icons.check} />Sem fidelidade</li>
             </ul>
           </div>
           <div className="land-stage" aria-hidden="true">
@@ -136,7 +145,7 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
               </header>
               <div className="land-mock__stats">
                 <article><small>Ofertas enviadas hoje</small><b>247</b></article>
-                <article><small>Comissões estimadas</small><b>R$ 384,72</b></article>
+                <article><small>Cliques nos links</small><b>1.284</b></article>
                 <article><small>Grupos ativos</small><b>12</b></article>
               </div>
               <p>Últimas ofertas</p>
@@ -151,7 +160,7 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
                 <small>Amazon</small>
               </div>
             </div>
-            <div className="land-toast"><Icon d={icons.check} />Oferta enviada para Grupo Ofertas VIP</div>
+            <div className="land-toast"><Icon d={icons.check} />Preço conferido · oferta enviada para 12 grupos</div>
           </div>
         </div>
       </section>
@@ -159,10 +168,10 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
       <section className="land-proof">
         <div className="land-wrap">
           {[
-            [icons.clock, "Automação 24/7", "Publica mesmo fora do seu horário"],
-            [icons.groups, "Vários grupos", "Uma estratégia para cada público"],
-            [icons.plug, "7 integrações", "As principais lojas de afiliado"],
-            [icons.shield, "Ambiente isolado", "Cada empresa com os próprios dados"]
+            [icons.clock, "24 horas por dia", "Sem PC nem celular ligado"],
+            [icons.check, "Desconto de verdade", "Preço conferido na hora do envio"],
+            [icons.chat, "Grupos, Status e Telegram", "Tudo no mesmo robô"],
+            [icons.shield, "Sua comissão", "Seu link de afiliado em cada oferta"]
           ].map(([icon, title, text]) => (
             <article key={title}>
               <Icon d={icon} />
@@ -175,15 +184,15 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
       <section className="land-band" id="como">
         <div className="land-wrap land-reveal">
           <div className="land-head">
-            <h2>Configure uma vez. Deixe o Achadinhos trabalhar.</h2>
-            <p>Da configuração ao envio da oferta em poucos minutos.</p>
+            <h2>Em 5 minutos o seu grupo começa a publicar sozinho.</h2>
+            <p>Sem programar, sem planilha e sem ficar copiando link.</p>
           </div>
           <div className="land-steps">
             {[
-              [icons.store, "Conecte suas lojas", "Adicione suas credenciais e links de afiliado."],
-              [icons.chat, "Conecte seu WhatsApp", "Use sua própria conexão para enviar as ofertas."],
-              [icons.filter, "Escolha grupos e categorias", "Defina quais produtos cada público deve receber."],
-              [icons.clock2, "Ative a automação", "O sistema busca, filtra e publica as ofertas automaticamente."]
+              [icons.store, "Conecte suas lojas", "Cole o seu código de afiliado do Mercado Livre, Amazon, Shopee ou Magalu. O guia passo a passo está dentro do painel."],
+              [icons.chat, "Conecte o WhatsApp", "Leia o QR code com o celular, como no WhatsApp Web. Telegram também."],
+              [icons.filter, "Escolha grupos e ritmo", "Marque os grupos, os horários e de quanto em quanto tempo cada loja publica."],
+              [icons.clock2, "Pronto", "O robô garimpa, confere o preço, monta a mensagem com foto e publica sozinho."]
             ].map(([icon, title, text], index) => (
               <article key={title}>
                 <b>{String(index + 1).padStart(2, "0")}</b>
@@ -199,16 +208,17 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
       <section className="land-band is-soft" id="recursos">
         <div className="land-wrap land-reveal">
           <div className="land-head">
-            <h2>Tudo que você precisa para escalar seus grupos de ofertas</h2>
+            <h2>Feito para quem vive de grupo de ofertas</h2>
+            <p>Cada detalhe foi pensado para o seu grupo vender mais e cansar menos.</p>
           </div>
           <div className="land-cards">
             {[
-              [icons.chat, "Publicação automática", "Envie ofertas sem precisar procurar produto por produto."],
-              [icons.groups, "Múltiplos grupos", "Configure estratégias diferentes para cada público."],
-              [icons.store, "Múltiplas lojas", "Centralize seus programas de afiliados em um só lugar."],
-              [icons.clock2, "Controle de horários", "Defina dias e horários em que cada automação pode funcionar."],
-              [icons.repeat, "Anti-repetição", "Evite reenviar a mesma oferta dentro do período configurado."],
-              [icons.chart, "Métricas", "Acompanhe cliques, ofertas publicadas e desempenho das campanhas."]
+              [icons.check, "Só desconto de verdade", "Publica só o que tem preço antigo maior que o atual, conferido no Mercado Livre na hora do envio."],
+              [icons.store, "Milhares de produtos", "Os mais vendidos de centenas de categorias do Mercado Livre pela API oficial, mais as promoções da Amazon, Shopee e Magalu."],
+              [icons.chat, "Grupos, Status e Telegram", "Publique nos grupos do WhatsApp, no Status para os seus contatos e no Telegram, cada um no seu ritmo."],
+              [icons.repeat, "Sem repetição e sem monotonia", "O mesmo produto não volta ao grupo por 72 h, e o robô intercala os tipos de produto."],
+              [icons.shield, "Proteção do seu número", "Ritmo e horários por loja, e o grupo que remove o número é desligado sozinho."],
+              [icons.chart, "Cliques medidos", "Veja quantas pessoas clicaram em cada oferta e quais lojas dão mais resultado."]
             ].map(([icon, title, text]) => (
               <article key={title}>
                 <Icon d={icon} />
@@ -223,15 +233,17 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
       <section className="land-band" id="integracoes">
         <div className="land-wrap land-reveal">
           <div className="land-head">
-            <h2>Suas lojas favoritas em um só lugar</h2>
-            <p>Conecte a conta de afiliado e deixe a busca entrar na rotina dos grupos.</p>
+            <h2>As maiores lojas do Brasil, com o seu link de afiliado</h2>
+            <p>Cada empresa usa as próprias contas: a comissão de cada venda é sua.</p>
           </div>
           <div className="land-stores">
-            {stores.map(([id, name]) => (
-              <article key={id}>
+            {stores.map(([id, name, live]) => (
+              <article key={id} className={live ? "" : "is-soon"}>
                 <img src={`/deals-logos/${id}.svg`} alt="" />
-                <strong>{name}</strong>
-                <span>Disponível</span>
+                <div>
+                  <strong>{name}</strong>
+                  <span>{live ? "Disponível" : "Em breve"}</span>
+                </div>
               </article>
             ))}
           </div>
@@ -244,17 +256,40 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
             <header><strong>Painel</strong><span>Hoje</span></header>
             <div className="land-board__row"><i className="is-on" />WhatsApp conectado<small>12 grupos</small></div>
             <div className="land-board__row"><i className="is-on" />Mercado Livre<small>42 ofertas hoje</small></div>
-            <div className="land-board__row"><i />Amazon<small>aguardando horário</small></div>
+            <div className="land-board__row"><i className="is-on" />Status do WhatsApp<small>8 publicações</small></div>
+            <div className="land-board__row"><i />Amazon<small>próximo lote 14h</small></div>
             <div className="land-board__bars"><span style={{ height: "46%" }} /><span style={{ height: "72%" }} /><span style={{ height: "58%" }} /><span style={{ height: "88%" }} /><span style={{ height: "64%" }} /></div>
           </div>
           <div>
-            <h2>Sua operação inteira em um único painel</h2>
-            <p>Veja quais grupos estão ativos, acompanhe as últimas publicações, gerencie suas lojas e controle toda a automação sem precisar alternar entre várias ferramentas.</p>
+            <h2>Você no controle, sem trabalho manual</h2>
+            <p>Acompanhe tudo de um painel só, inclusive pelo celular: o que saiu, para onde foi, quantos cliques deu e quando sai o próximo lote.</p>
             <ul className="land-list">
-              {["Status das conexões", "Histórico de publicações", "Configuração por grupo", "Controle de lojas e categorias", "Métricas de desempenho"].map((item) => (
+              {["Conexões e grupos", "Ritmo e horário por loja", "Histórico de publicações", "Cliques por oferta", "Guia passo a passo de cada loja"].map((item) => (
                 <li key={item}><Icon d={icons.check} />{item}</li>
               ))}
             </ul>
+          </div>
+        </div>
+      </section>
+
+      <section className="land-band is-soft">
+        <div className="land-wrap land-reveal">
+          <div className="land-head">
+            <h2>Garimpar na mão ou deixar o robô trabalhar?</h2>
+          </div>
+          <div className="land-cards land-compare">
+            <article>
+              <h3>Na mão</h3>
+              <ul className="land-list">
+                {["Horas por dia procurando promoção", "Copiar link, montar texto, achar foto", "Oferta que já acabou quando você posta", "Grupo parado quando você dorme ou trabalha", "Sempre os mesmos produtos"].map((item) => <li key={item}>✕ {item}</li>)}
+              </ul>
+            </article>
+            <article className="is-good">
+              <h3>Com o Achadinhos</h3>
+              <ul className="land-list">
+                {["Ofertas novas o dia todo, sozinho", "Mensagem pronta com foto, preço e seu link", "Preço conferido na hora do envio", "Grupo ativo 24 horas por dia", "Milhares de produtos, sem repetir em 72 h"].map((item) => <li key={item}><Icon d={icons.check} />{item}</li>)}
+              </ul>
+            </article>
           </div>
         </div>
       </section>
@@ -263,8 +298,8 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
         <section className="land-band" id="planos">
           <div className="land-wrap land-reveal">
             <div className="land-head">
-              <h2>Escolha como quer começar</h2>
-              <p>O teste grátis vale para o plano que você escolher no cadastro.</p>
+              <h2>Comece grátis. Escolha o plano depois.</h2>
+              <p>{trialDays ? `${trialDays} dias grátis em qualquer plano. ` : ""}Depois, pague por Pix com liberação na hora, e troque de plano quando quiser.</p>
             </div>
             <div className={`land-plans is-${Math.min(plans.length, 3)}`}>
               {plans.map((plan, index) => {
@@ -277,12 +312,13 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
                     <h3>{plan.name}</h3>
                     <p className="land-price">{money(price[0] as number)}<small>{price[1]}</small></p>
                     {plan.trial_days > 0 ? <p className="land-trial">{plan.trial_days} dias grátis</p> : null}
+                    {yearlySaving(plan) ? <p className="land-trial">ou {money(plan.yearly_cents)}/ano, economize {yearlySaving(plan)}%</p> : null}
                     <ul>
                       <li>{cap(plan.max_groups, "grupo", "grupos")}</li>
                       <li>{cap(plan.max_connections, "conexão WhatsApp", "conexões WhatsApp")}</li>
                       {benefits.map((line) => <li key={line}>{line}</li>)}
                     </ul>
-                    <button type="button" className="land-btn is-primary" onClick={() => start(plan.slug)}>Começar grátis</button>
+                    <button type="button" className="land-btn is-primary" onClick={() => start(plan.slug)}>{plan.trial_days > 0 ? `Testar ${plan.trial_days} dias grátis` : "Assinar"}</button>
                   </article>
                 );
               })}
@@ -325,10 +361,10 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
 
       <section className="land-cta">
         <div className="land-wrap">
-          <h2>Pare de procurar ofertas manualmente.</h2>
-          <p>Configure seus grupos e deixe o Achadinhos cuidar da rotina de publicação.</p>
-          <button type="button" className="land-btn is-primary" onClick={() => start()}>Criar minha conta grátis</button>
-          <small>Leva menos de 5 minutos para começar.</small>
+          <h2>Pare de garimpar oferta na mão.</h2>
+          <p>Enquanto você trabalha, dorme ou descansa, o Achadinhos mantém os seus grupos vivos e com o seu link em cada oferta.</p>
+          <button type="button" className="land-btn is-primary" onClick={() => start()}>{trialDays ? `Começar meus ${trialDays} dias grátis` : "Criar minha conta"}</button>
+          <small>Leva menos de 5 minutos. Sem cartão e sem fidelidade.</small>
         </div>
       </section>
 
@@ -338,7 +374,7 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
             <Mark />
             <div>
               <strong>Achadinhos</strong>
-              <p>Automação de ofertas para afiliados.</p>
+              <p>Robô de ofertas para afiliados: Mercado Livre, Amazon, Shopee e Magalu.</p>
             </div>
           </div>
           <div>
@@ -363,7 +399,7 @@ export function Landing({ onLogin, onRegister }: { onLogin: () => void; onRegist
           <div className="land-wrap land-legal">
             <h2>{legal === "termos" ? "Termos de Uso" : legal === "privacidade" ? "Política de Privacidade" : "Contato"}</h2>
             {legal === "termos" ? (
-              <p>O uso segue o plano escolhido no cadastro. O teste pode ser encerrado a qualquer momento, e a publicação automática fica limitada ao que esse plano permitir.</p>
+              <p>O uso segue o plano contratado. O teste grátis pode ser encerrado a qualquer momento; depois dele, a assinatura é paga por Pix e renovada só se você pagar o próximo período. Os limites de grupos, conexões e usuários são os do plano. Você é responsável pelas regras de cada grupo e das lojas de afiliados.</p>
             ) : legal === "privacidade" ? (
               <p>Cada empresa acessa somente os próprios grupos, contatos, lojas e credenciais. Esses dados não são exibidos para as outras contas da plataforma.</p>
             ) : (
