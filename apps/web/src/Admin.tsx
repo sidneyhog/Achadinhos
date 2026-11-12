@@ -1071,11 +1071,12 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label className="sx-check"><input type="checkbox" checked={planOpen.priority} onChange={(event) => setPlanOpen({ ...planOpen, priority: event.target.checked })} /> Suporte prioritário</label>
                 <label className="sx-check"><input type="checkbox" checked={planOpen.active} onChange={(event) => setPlanOpen({ ...planOpen, active: event.target.checked })} /> Plano ativo na landing</label>
                 <p className="is-wide" style={{ margin: "8px 0 0", fontSize: 13, color: "#64748b" }}>
-                  <b>Links de pagamento do PagBank</b> (opcional). Com o link preenchido, o cliente paga na página do PagBank (Pix, cartão ou boleto)
-                  e você confirma em Pagamentos. Crie em minhaconta.pagbank.com.br → Venda online → Link de pagamento, com o mesmo valor do período.
+                  <b>Pagamento manual</b> (opcional). Cole o <b>link de pagamento do PagBank</b> (o cliente paga com Pix, cartão ou boleto na página deles)
+                  ou um <b>código Pix copia e cola</b> de valor fixo (ex.: cobrança do Nubank, começa em 000201), sempre com o mesmo valor do período.
+                  Você confirma o pagamento em Pagamentos.
                 </p>
                 {([["monthly", "Link mensal"], ["quarterly", "Link trimestral"], ["semiannual", "Link semestral"], ["yearly", "Link anual"]] as const).map(([key, label]) => (
-                  <label key={key} className="is-wide">{label}<input value={planOpen.links[key] || ""} inputMode="url" placeholder="https://pag.ae/..." onChange={(event) => setPlanOpen({ ...planOpen, links: { ...planOpen.links, [key]: event.target.value } })} /></label>
+                  <label key={key} className="is-wide">{label}<input value={planOpen.links[key] || ""} inputMode="url" placeholder="https://pag.ae/... ou 000201..." onChange={(event) => setPlanOpen({ ...planOpen, links: { ...planOpen.links, [key]: event.target.value } })} /></label>
                 ))}
               </div>
             </div>
@@ -1190,7 +1191,7 @@ function PayTable({ rows, onConfirm }: { rows: any[]; onConfirm?: (row: any) => 
         <tbody>
           {rows.map((row: any) => (
             <tr key={row.id}>
-              <td>{row.company}{row.plan ? <small style={{ display: "block", color: "#64748b" }}>{row.plan} · {labelOf(row.cycle)}</small> : null}</td>
+              <td><small style={{ color: "#64748b" }}>nº {row.id}</small> {row.company}{row.plan ? <small style={{ display: "block", color: "#64748b" }}>{row.plan} · {labelOf(row.cycle)}</small> : null}</td>
               <td>{money(row.amount_cents)}</td><td>{labelOf(row.method)}</td><td><Badge tone={toneOf(row.status)}>{row.provider === "link" && row.status === "pending" ? "Aguardando confirmação" : labelOf(row.status)}</Badge></td><td>{when(row.paid_at || row.created_at)}</td>
               {onConfirm ? <td>{row.provider === "link" && row.status === "pending" ? <button type="button" className="sx-btn is-solid" onClick={() => onConfirm(row)}>Confirmar pagamento</button> : null}</td> : null}
             </tr>

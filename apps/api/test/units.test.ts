@@ -811,3 +811,14 @@ test("Link de pagamento: só https do PagBank", async () => {
   assert.equal(payLinksOf({ monthly: "https://x.com/1" }), null);
   assert.deepEqual(payLinksOf(undefined), {});
 });
+
+test("Pix copia e cola: aceita código com CRC certo e recusa adulterado", async () => {
+  const { isPixCode, payLinkOf } = await import("../src/payLinks");
+  // Exemplo público do manual do BR Code (Banco Central).
+  const code = "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D";
+  assert.equal(isPixCode(code), true);
+  assert.equal(payLinkOf(code), code);
+  assert.equal(isPixCode(code.replace("Fulano", "Golpes")), false);
+  assert.equal(payLinkOf("000201xyz"), null);
+  assert.equal(payLinkOf("https://nubank.com.br/cobrar/abc"), "https://nubank.com.br/cobrar/abc");
+});

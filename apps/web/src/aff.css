@@ -1777,3 +1777,6 @@ button.land-brand { background: none; border: 0; padding: 0; cursor: pointer; fo
 .land-whats:hover { transform: translateY(-2px); }
 .land-whats svg { width: 26px; height: 26px; fill: #fff; }
 @media (max-width: 640px) { .land-whats { padding: 14px; right: 16px; bottom: 16px; } .land-whats span { display: none; } }
+
+/* Botão com cara de link (ex.: copiar o Pix de novo em Minha assinatura). */
+.aff-linkbtn { border: 0; background: none; padding: 0; color: #635bff; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }

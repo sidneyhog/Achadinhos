@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
 import { audit, one, q, withTransaction } from "./db";
 import { decrypt, encrypt } from "./secrets";
 import { createBoleto, createCard, createPix, efiConfigured, testEfiConnection } from "./efi";
-import { payLinksOf } from "./payLinks";
+import { isPixCode, payLinksOf } from "./payLinks";
 import { createPagbankPix, getPagbankOrder, loadPagbank, pagbankError, testPagbank } from "./pagbank";
 import { loadEfiRuntime, loadPlatform } from "./platform";
 import { stopSession } from "./zapo/session";
@@ -477,7 +477,7 @@ const planValues = (body: Record<string, unknown>) => ({
   active: body.active !== false,
   payLinks: payLinksOf(body.payLinks)
 });
-const BAD_PAY_LINK = "Link de pagamento inválido: cole o link https gerado no PagBank (pagbank.com.br, pagseguro ou pag.ae)";
+const BAD_PAY_LINK = "Pagamento inválido: cole o link https do PagBank (ou Nubank) ou o código Pix copia e cola completo, começando em 000201";
 
 app.post("/api/admin/plans", auth, admin, async (req, res) => {
   const plan = planValues(req.body || {});
@@ -2247,7 +2247,8 @@ app.get("/api/billing", auth, async (req, res, next) => {
         maxGroups: plan.max_groups,
         maxConnections: plan.max_connections,
         prices: { monthly: plan.monthly_cents, quarterly: plan.quarterly_cents, semiannual: plan.semiannual_cents, yearly: plan.yearly_cents },
-        links: Object.fromEntries(Object.keys(plan.pay_links || {}).map(cycle => [cycle, true]))
+        // "pix" = copia e cola mostrado aqui; "page" = página do PagBank. O conteúdo só sai no checkout.
+        links: Object.fromEntries(Object.entries(plan.pay_links || {}).map(([cycle, link]) => [cycle, isPixCode(String(link)) ? "pix" : "page"]))
       })),
       subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status },
       taxIdHint: digits ? `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}` : "",
@@ -2309,6 +2310,13 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
           [companyId, linkSub.plan_id, price, linkCycle, JSON.stringify({ link: payLink })]
         );
         await audit(companyId, user.id, "payment", `Abriu o link do PagBank: ${linkSub.plan_name} (${linkCycle})`);
+      }
+      if (isPixCode(payLink)) {
+        // Código Pix copia e cola (ex.: Nubank): o QR é gerado aqui, a partir do mesmo texto.
+        const qrcode = await import("qrcode");
+        const toDataURL = qrcode.toDataURL || (qrcode as unknown as { default: typeof qrcode }).default.toDataURL;
+        const qrImage = await toDataURL(payLink, { margin: 1, width: 300 });
+        return res.json({ configured: true, provider: "link", pix: payLink, qrImage, amountCents: price, invoiceId: row!.id });
       }
       return res.json({ configured: true, provider: "link", link: payLink, invoiceId: row!.id });
     }

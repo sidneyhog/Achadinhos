@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { supportLink } from "./SupportWhats";
 
 type Invoice = { id: number; amountCents: number; cycle: string; status: string; provider: string; qrText: string; qrImage: string; expiresAt: string | null; paidAt: string | null };
 type Billing = {
@@ -7,7 +8,7 @@ type Billing = {
   /** Pagamento pelo link do PagBank esperando o super admin confirmar. */
   awaiting: { id: number; amountCents: number; cycle: string; createdAt: string; link: string } | null;
   plan: { slug: string; name: string; prices: Record<string, number | null> };
-  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null>; links?: Record<string, boolean> }>;
+  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null>; links?: Record<string, "pix" | "page"> }>;
   subscription: { status: string; cycle: string | null; trialEndsAt: string | null; currentPeriodEnd: string | null; companyStatus: string };
   taxIdHint: string;
   open: Invoice | null;
@@ -29,6 +30,8 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   const [busy, setBusy] = useState(false);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [paidUntil, setPaidUntil] = useState<string | null>(null);
+  /** Pix copia e cola de valor fixo cadastrado no plano (ex.: Nubank): confirmação manual pelo super admin. */
+  const [manualPix, setManualPix] = useState<{ code: string; qrImage: string; amountCents: number; invoiceId: number } | null>(null);
   const [now, setNow] = useState(Date.now());
   const checking = useRef(false);
 
@@ -73,8 +76,13 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   const pay = async () => {
     setBusy(true);
     try {
-      const result = await api<{ configured: boolean; message?: string; invoice?: Invoice; provider?: string; link?: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId, planSlug }) });
+      const result = await api<{ configured: boolean; message?: string; invoice?: Invoice; provider?: string; link?: string; pix?: string; qrImage?: string; amountCents?: number; invoiceId?: number }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId, planSlug }) });
       if (!result.configured) { tell("Pagamento", result.message || "O pagamento online ainda não está ativo.", "bad"); return; }
+      if (result.provider === "link" && result.pix) {
+        setManualPix({ code: result.pix, qrImage: result.qrImage || "", amountCents: Number(result.amountCents || 0), invoiceId: Number(result.invoiceId || 0) });
+        await load();
+        return;
+      }
       if (result.provider === "link" && result.link) {
         // Vai para a página do PagBank na mesma aba: nova aba depois de um await é bloqueada pelo navegador (celular).
         // O plano é liberado quando o pagamento for confirmado; na volta, a tela mostra "Aguardando confirmação".
@@ -89,10 +97,20 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
     }
   };
 
-  const copy = async () => {
-    if (!invoice) return;
+  /** Pagamento manual: o cliente manda o comprovante no WhatsApp do suporte, que confirma no super admin. */
+  const sendReceipt = (invoiceId: number, amountCents: number, cycleId: string) => {
+    const planName = data?.plans?.find((plan) => plan.slug === planSlug)?.name || data?.plan.name || "";
+    const text = `Olá! Paguei a assinatura do Achadinhos.
+Fatura nº ${invoiceId} · plano ${planName} · ${cycleName(cycleId)} · ${money(amountCents)}.
+Segue o comprovante:`;
+    window.open(supportLink(text), "_blank", "noopener,noreferrer");
+  };
+
+  const copy = async (text?: string) => {
+    const value = text || invoice?.qrText;
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(invoice.qrText);
+      await navigator.clipboard.writeText(value);
       tell("Copiado", "Cole no app do seu banco, na opção Pix copia e cola.");
     } catch {
       tell("Copie o código", "Toque e segure o código abaixo para copiar.", "bad");
@@ -109,7 +127,8 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   // Plano escolhido na hora de pagar: o Pix sai com o preço dele, e a troca só vale quando o pagamento é confirmado.
   const chosen = data.plans?.find((plan) => plan.slug === planSlug) || { ...data.plan, maxGroups: null, maxConnections: null };
   const changing = chosen.slug !== data.plan.slug;
-  const byLink = Boolean((chosen as { links?: Record<string, boolean> }).links?.[cycle]);
+  const linkKind = (chosen as { links?: Record<string, "pix" | "page"> }).links?.[cycle];
+  const byLink = Boolean(linkKind);
   const limits = (plan: { maxGroups: number | null; maxConnections: number | null }) =>
     [plan.maxGroups == null ? "grupos sem limite" : `${plan.maxGroups} grupo${plan.maxGroups === 1 ? "" : "s"}`, plan.maxConnections == null ? "conexões sem limite" : `${plan.maxConnections} conex${plan.maxConnections === 1 ? "ão" : "ões"}`].join(" · ");
   const pickPlan = (slug: string) => {
@@ -137,11 +156,31 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
         {data.awaiting && invoice?.status !== "paid" ? (
           <div className="aff-wastate is-qr">
             <strong>⏳ Aguardando confirmação do pagamento</strong>
-            <span>{money(data.awaiting.amountCents)} · {cycleName(data.awaiting.cycle)}. Assim que o pagamento no PagBank for confirmado, o plano é liberado. Ainda não pagou? <a href={data.awaiting.link} target="_blank" rel="noopener noreferrer">Abrir o PagBank de novo</a>.</span>
+            <span>{money(data.awaiting.amountCents)} · {cycleName(data.awaiting.cycle)}. Já pagou? Mande o comprovante no WhatsApp e o plano é liberado assim que conferirmos.</span>
+            <div className="aff-conn__actions">
+              <button type="button" className="is-solid" onClick={() => sendReceipt(data.awaiting!.id, data.awaiting!.amountCents, data.awaiting!.cycle)}>Enviar comprovante no WhatsApp</button>
+            </div>
+            <span>Ainda não pagou? {data.awaiting.link.startsWith("000201")
+              ? <button type="button" className="aff-linkbtn" onClick={() => copy(data.awaiting!.link)}>Copiar o código Pix de novo</button>
+              : <a href={data.awaiting.link} target="_blank" rel="noopener noreferrer">Abrir o PagBank de novo</a>}.</span>
           </div>
         ) : null}
 
-        {!data.provider ? (
+        {manualPix ? (
+          <article className="aff-pref" style={{ justifyItems: "center", textAlign: "center" }}>
+            <strong>Pague {money(manualPix.amountCents)} com Pix</strong>
+            {manualPix.qrImage ? <img src={manualPix.qrImage} alt="QR Code Pix" width={260} height={260} /> : null}
+            <small>Abra o app do banco, escolha Pix e leia o QR Code, ou use o copia e cola.</small>
+            <textarea readOnly value={manualPix.code} rows={3} style={{ width: "100%", fontSize: 12 }} onFocus={(event) => event.currentTarget.select()} />
+            <div className="aff-conn__actions">
+              <button type="button" className="is-solid" onClick={() => copy(manualPix.code)}>Copiar código Pix</button>
+              <button type="button" onClick={() => { sendReceipt(manualPix.invoiceId, manualPix.amountCents, cycle); setManualPix(null); tell("Envie o comprovante", "Abrimos o WhatsApp: anexe o comprovante e envie. O plano é liberado assim que conferirmos."); }}>Já paguei: enviar comprovante</button>
+            </div>
+            <small>Depois de pagar, toque em <b>Já paguei</b> e mande o comprovante no WhatsApp. O plano é liberado assim que conferirmos.</small>
+          </article>
+        ) : null}
+
+        {manualPix ? null : !data.provider ? (
           <p className="aff-config-error">O pagamento online ainda não está ativo. Fale com o suporte para renovar.</p>
         ) : invoice && invoice.status === "pending" && !expired ? (
           <article className="aff-pref" style={{ justifyItems: "center", textAlign: "center" }}>
@@ -150,7 +189,7 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
             <small>Abra o app do banco, escolha Pix e leia o QR Code, ou use o copia e cola.</small>
             <textarea readOnly value={invoice.qrText} rows={3} style={{ width: "100%", fontSize: 12 }} onFocus={(event) => event.currentTarget.select()} />
             <div className="aff-conn__actions">
-              <button type="button" className="is-solid" onClick={copy}>Copiar código Pix</button>
+              <button type="button" className="is-solid" onClick={() => copy()}>Copiar código Pix</button>
               <button type="button" onClick={() => check(true)}>Já paguei</button>
             </div>
             <small>⏳ Aguardando pagamento · expira em {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</small>
@@ -177,9 +216,11 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
             ) : null}
             {byLink ? (
               <>
-                <small>Você paga na página segura do PagBank: <b>Pix, cartão de crédito ou boleto</b>. A liberação do plano acontece quando o pagamento for confirmado.</small>
+                <small>{linkKind === "pix"
+                  ? <>Você paga com <b>Pix</b> pelo app do seu banco. A liberação do plano acontece quando o pagamento for conferido.</>
+                  : <>Você paga na página segura do PagBank: <b>Pix, cartão de crédito ou boleto</b>. A liberação do plano acontece quando o pagamento for confirmado.</>}</small>
                 <div className="aff-conn__actions">
-                  <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Abrindo…" : "Pagar no PagBank"}</button>
+                  <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Abrindo…" : linkKind === "pix" ? "Pagar com Pix" : "Pagar no PagBank"}</button>
                 </div>
               </>
             ) : (
