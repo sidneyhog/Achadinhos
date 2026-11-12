@@ -217,7 +217,7 @@ Segue o comprovante:`;
             {byLink ? (
               <>
                 <small>{linkKind === "pix" || linkKind === "nubank"
-                  ? <>Você paga com <b>Pix</b> pelo app de qualquer banco{linkKind === "nubank" ? " (abre a página de cobrança do Nubank)" : ""}. Depois, é só mandar o comprovante no WhatsApp e o plano é liberado assim que conferirmos.</>
+                  ? <>Você paga com <b>Pix</b> pelo app do seu banco. Depois, é só mandar o comprovante no WhatsApp e o plano é liberado assim que conferirmos.</>
                   : <>Você paga na página segura do PagBank: <b>Pix, cartão de crédito ou boleto</b>. A liberação do plano acontece quando o pagamento for confirmado.</>}</small>
                 <div className="aff-conn__actions">
                   <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Abrindo…" : linkKind === "pix" || linkKind === "nubank" ? "Pagar com Pix" : "Pagar no PagBank"}</button>
