@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import { audit, one, q, withTransaction } from "./db";
 import { decrypt, encrypt } from "./secrets";
 import { createBoleto, createCard, createPix, efiConfigured, testEfiConnection } from "./efi";
+import { payLinksOf } from "./payLinks";
 import { createPagbankPix, getPagbankOrder, loadPagbank, pagbankError, testPagbank } from "./pagbank";
 import { loadEfiRuntime, loadPlatform } from "./platform";
 import { stopSession } from "./zapo/session";
@@ -473,16 +474,19 @@ const planValues = (body: Record<string, unknown>) => ({
   users: body.maxUsers == null || body.maxUsers === "" ? null : Number(body.maxUsers),
   sort: Number(body.sortOrder || 0),
   features: JSON.stringify({ api: Boolean(body.api), prioritySupport: Boolean(body.prioritySupport) }),
-  active: body.active !== false
+  active: body.active !== false,
+  payLinks: payLinksOf(body.payLinks)
 });
+const BAD_PAY_LINK = "Link de pagamento inválido: cole o link https gerado no PagBank (pagbank.com.br, pagseguro ou pag.ae)";
 
 app.post("/api/admin/plans", auth, admin, async (req, res) => {
   const plan = planValues(req.body || {});
   if (!plan.name || !plan.slug) return res.status(400).json({ error: "Informe o nome do plano" });
+  if (!plan.payLinks) return res.status(400).json({ error: BAD_PAY_LINK });
   const row = await one(
-    `INSERT INTO plans (name, slug, description, benefits, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents, trial_days, max_connections, max_groups, max_stores, max_posts_per_day, max_posts_per_month, max_users, sort_order, features, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18) RETURNING *`,
-    [plan.name, plan.slug, plan.description, plan.benefits, plan.monthly, plan.quarterly, plan.semiannual, plan.yearly, plan.trial, plan.connections, plan.groups, plan.stores, plan.posts, plan.postsMonth, plan.users, plan.sort, plan.features, plan.active]
+    `INSERT INTO plans (name, slug, description, benefits, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents, trial_days, max_connections, max_groups, max_stores, max_posts_per_day, max_posts_per_month, max_users, sort_order, features, active, pay_links)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19::jsonb) RETURNING *`,
+    [plan.name, plan.slug, plan.description, plan.benefits, plan.monthly, plan.quarterly, plan.semiannual, plan.yearly, plan.trial, plan.connections, plan.groups, plan.stores, plan.posts, plan.postsMonth, plan.users, plan.sort, plan.features, plan.active, JSON.stringify(plan.payLinks)]
   );
   await audit(null, (req as Request & { auth: AuthUser }).auth.id, "plan", `Plano ${plan.name} criado`, ipOf(req));
   res.status(201).json({ plan: row });
@@ -490,12 +494,13 @@ app.post("/api/admin/plans", auth, admin, async (req, res) => {
 
 app.patch("/api/admin/plans/:id", auth, admin, async (req, res) => {
   const plan = planValues(req.body || {});
+  if (!plan.payLinks) return res.status(400).json({ error: BAD_PAY_LINK });
   await q(
     `UPDATE plans SET name = $2, description = $3, benefits = $4, monthly_cents = $5, quarterly_cents = $6, semiannual_cents = $7, yearly_cents = $8,
       trial_days = $9, max_connections = $10, max_groups = $11, max_stores = $12, max_posts_per_day = $13, max_posts_per_month = $14, max_users = $15,
-      sort_order = $16, features = $17::jsonb, active = $18
+      sort_order = $16, features = $17::jsonb, active = $18, pay_links = $19::jsonb
      WHERE id = $1`,
-    [Number(req.params.id), plan.name, plan.description, plan.benefits, plan.monthly, plan.quarterly, plan.semiannual, plan.yearly, plan.trial, plan.connections, plan.groups, plan.stores, plan.posts, plan.postsMonth, plan.users, plan.sort, plan.features, plan.active]
+    [Number(req.params.id), plan.name, plan.description, plan.benefits, plan.monthly, plan.quarterly, plan.semiannual, plan.yearly, plan.trial, plan.connections, plan.groups, plan.stores, plan.posts, plan.postsMonth, plan.users, plan.sort, plan.features, plan.active, JSON.stringify(plan.payLinks)]
   );
   await audit(null, (req as Request & { auth: AuthUser }).auth.id, "plan", `Plano ${plan.name} atualizado`, ipOf(req));
   res.json({ ok: true });
@@ -593,8 +598,8 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
        FROM subscriptions s JOIN companies c ON c.id = s.company_id JOIN plans p ON p.id = s.plan_id ORDER BY s.id DESC`
     );
     const invoices = await q(
-      `SELECT i.id, c.name AS company, i.amount_cents, i.method, i.cycle, i.status, i.created_at, i.paid_at
-       FROM invoices i JOIN companies c ON c.id = i.company_id ORDER BY i.id DESC LIMIT 200`
+      `SELECT i.id, c.name AS company, i.amount_cents, i.method, i.cycle, i.status, i.provider, i.created_at, i.paid_at, p.name AS plan
+       FROM invoices i JOIN companies c ON c.id = i.company_id LEFT JOIN plans p ON p.id = i.plan_id ORDER BY i.id DESC LIMIT 200`
     );
     const whatsapp = await q(
       `SELECT w.id, w.name, w.status, w.phone, w.last_error, w.created_at, (w.qr <> '') AS has_qr, c.name AS company,
@@ -2103,7 +2108,7 @@ app.post("/api/audience/jobs/:id/stop", auth, async (req, res, next) => {
 const CYCLE_DAYS: Record<string, number> = { monthly: 30, quarterly: 90, semiannual: 180, yearly: 365 };
 const PIX_MINUTES = 30;
 
-type CheckoutSub = { plan_id: number; slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; name: string; plan_name: string; tax_id: string };
+type CheckoutSub = { plan_id: number; slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; name: string; plan_name: string; tax_id: string; pay_links: Record<string, string> | null };
 
 /**
  * Assinatura para cobrar. Com `planSlug` de outro plano ativo, os preços e o plan_id vêm desse plano: o cliente troca de
@@ -2111,14 +2116,14 @@ type CheckoutSub = { plan_id: number; slug: string; monthly_cents: number; quart
  */
 const loadCheckoutSub = async (companyId: number, planSlug?: unknown): Promise<CheckoutSub | null> => {
   const sub = await one<CheckoutSub>(
-    `SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name, p.name AS plan_name, c.tax_id
+    `SELECT s.plan_id, p.slug, p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents, c.name, p.name AS plan_name, c.tax_id, p.pay_links
      FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
     [companyId]
   );
   const slug = String(planSlug || "").trim();
   if (!sub || !slug || slug === sub.slug) return sub;
-  const plan = await one<Pick<CheckoutSub, "plan_id" | "slug" | "monthly_cents" | "quarterly_cents" | "semiannual_cents" | "yearly_cents" | "plan_name">>(
-    "SELECT id AS plan_id, slug, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents, name AS plan_name FROM plans WHERE slug = $1 AND active = true",
+  const plan = await one<Pick<CheckoutSub, "plan_id" | "slug" | "monthly_cents" | "quarterly_cents" | "semiannual_cents" | "yearly_cents" | "plan_name" | "pay_links">>(
+    "SELECT id AS plan_id, slug, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents, name AS plan_name, pay_links FROM plans WHERE slug = $1 AND active = true",
     [slug]
   );
   return plan ? { ...sub, ...plan } : null;
@@ -2210,8 +2215,8 @@ app.get("/api/billing", auth, async (req, res, next) => {
       [companyId]
     );
     if (!sub) return res.status(404).json({ error: "Sem assinatura" });
-    const plans = await q<{ slug: string; name: string; max_groups: number | null; max_connections: number | null; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
-      "SELECT slug, name, max_groups, max_connections, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents FROM plans WHERE active = true ORDER BY sort_order, monthly_cents"
+    const plans = await q<{ slug: string; name: string; max_groups: number | null; max_connections: number | null; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number; pay_links: Record<string, string> | null }>(
+      "SELECT slug, name, max_groups, max_connections, monthly_cents, quarterly_cents, semiannual_cents, yearly_cents, pay_links FROM plans WHERE active = true ORDER BY sort_order, monthly_cents"
     );
     const open = await one<Parameters<typeof invoiceView>[0]>(
       `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND status = 'pending' AND provider = 'pagbank' AND expires_at > now() ORDER BY id DESC LIMIT 1`,
@@ -2221,9 +2226,16 @@ app.get("/api/billing", auth, async (req, res, next) => {
       `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND status = 'paid' ORDER BY paid_at DESC LIMIT 12`,
       [companyId]
     );
+    // Pagamento por link do PagBank aguardando o super admin confirmar.
+    const awaiting = await one<Parameters<typeof invoiceView>[0]>(
+      `SELECT ${INVOICE_COLUMNS} FROM invoices WHERE company_id = $1 AND status = 'pending' AND provider = 'link' AND expires_at > now() ORDER BY id DESC LIMIT 1`,
+      [companyId]
+    );
+    const anyLink = plans.some(plan => Object.keys(plan.pay_links || {}).length > 0);
     const digits = String(sub.tax_id || "");
     res.json({
-      provider,
+      provider: provider || (anyLink ? "link" : null),
+      awaiting: awaiting ? { id: awaiting.id, amountCents: awaiting.amount_cents, cycle: awaiting.cycle, createdAt: awaiting.created_at, link: String((awaiting.payload as { link?: string } | null)?.link || "") } : null,
       plan: {
         slug: sub.plan_slug,
         name: sub.plan_name,
@@ -2234,7 +2246,8 @@ app.get("/api/billing", auth, async (req, res, next) => {
         name: plan.name,
         maxGroups: plan.max_groups,
         maxConnections: plan.max_connections,
-        prices: { monthly: plan.monthly_cents, quarterly: plan.quarterly_cents, semiannual: plan.semiannual_cents, yearly: plan.yearly_cents }
+        prices: { monthly: plan.monthly_cents, quarterly: plan.quarterly_cents, semiannual: plan.semiannual_cents, yearly: plan.yearly_cents },
+        links: Object.fromEntries(Object.keys(plan.pay_links || {}).map(cycle => [cycle, true]))
       })),
       subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status },
       taxIdHint: digits ? `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}` : "",
@@ -2276,6 +2289,29 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
   try {
     const companyId = companyIdOf(req);
     const user = (req as Request & { auth: AuthUser & { name?: string; email?: string } }).auth;
+    const linkCycle = CYCLE_DAYS[String(req.body?.cycle)] ? String(req.body.cycle) : "monthly";
+    const linkSub = await loadCheckoutSub(companyId, req.body?.planSlug);
+    const payLink = linkSub?.pay_links?.[linkCycle];
+    if (linkSub && payLink) {
+      const price = cyclePrice(linkSub, linkCycle);
+      if (price == null) return res.status(400).json({ error: "Esse ciclo não tem preço neste plano" });
+      if (String(req.body?.coupon || "").trim()) {
+        return res.status(400).json({ error: "Cupom não vale no pagamento pelo link do PagBank. Apague o cupom ou fale com o suporte." });
+      }
+      // Mesmo plano e período ainda aguardando: reaproveita, para não acumular faturas pendentes.
+      let row = await one<{ id: number }>(
+        "SELECT id FROM invoices WHERE company_id = $1 AND provider = 'link' AND status = 'pending' AND plan_id = $2 AND cycle = $3 AND expires_at > now() ORDER BY id DESC LIMIT 1",
+        [companyId, linkSub.plan_id, linkCycle]
+      );
+      if (!row) {
+        row = await one<{ id: number }>(
+          "INSERT INTO invoices (company_id, plan_id, amount_cents, method, cycle, provider, expires_at, payload) VALUES ($1,$2,$3,'link',$4,'link',now() + interval '7 days',$5::jsonb) RETURNING id",
+          [companyId, linkSub.plan_id, price, linkCycle, JSON.stringify({ link: payLink })]
+        );
+        await audit(companyId, user.id, "payment", `Abriu o link do PagBank: ${linkSub.plan_name} (${linkCycle})`);
+      }
+      return res.json({ configured: true, provider: "link", link: payLink, invoiceId: row!.id });
+    }
     const pag = await loadPagbank();
     const usePagbank = pag.active && Boolean(pag.token);
     if (!usePagbank && !(await efiConfigured())) {
@@ -2379,6 +2415,24 @@ app.post("/api/billing/checkout", auth, async (req, res, next) => {
     }
     await q("UPDATE invoices SET payload = $2::jsonb WHERE id = $1", [invoice!.id, JSON.stringify(payload)]);
     res.json({ configured: true, provider: "efi", invoiceId: invoice!.id, payload });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Super admin: confirma um pagamento feito pelo link do PagBank (ele não avisa o sistema) e libera o plano. */
+app.post("/api/admin/invoices/:id/confirm", auth, admin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const inv = await one<{ id: number; company_id: number; status: string; provider: string }>("SELECT id, company_id, status, provider FROM invoices WHERE id = $1", [id]);
+    if (!inv) return res.status(404).json({ error: "Fatura não encontrada" });
+    if (inv.provider !== "link") return res.status(400).json({ error: "Só faturas do link do PagBank são confirmadas à mão" });
+    if (inv.status === "paid") return res.json({ ok: true });
+    if (inv.status !== "pending") return res.status(400).json({ error: "Essa fatura não está pendente" });
+    const adminId = (req as Request & { auth: AuthUser }).auth.id;
+    await settleInvoice(inv.id, { provider: "link", confirmedBy: adminId });
+    await audit(inv.company_id, adminId, "payment", `Pagamento pelo link do PagBank confirmado (fatura ${inv.id})`, ipOf(req));
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

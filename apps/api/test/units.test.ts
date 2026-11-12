@@ -798,3 +798,16 @@ test("Shopee: sem campanha, a busca varia de palavra e de página", async () => 
   assert.equal(shopeeSearchPlan('air "fryer"', () => 0).keyword, "air fryer");
   assert.equal(shopeeSearchPlan("", () => 0.999999).page, 3);
 });
+
+test("Link de pagamento: só https do PagBank", async () => {
+  const { payLinkOf, payLinksOf } = await import("../src/payLinks");
+  assert.equal(payLinkOf(""), "");
+  assert.equal(payLinkOf("https://pag.ae/7abcDEF"), "https://pag.ae/7abcDEF");
+  assert.equal(payLinkOf("https://cobranca.pagbank.com.br/abc"), "https://cobranca.pagbank.com.br/abc");
+  assert.equal(payLinkOf("http://pag.ae/7abc"), null);
+  assert.equal(payLinkOf("https://pag.ae.golpe.com/x"), null);
+  assert.equal(payLinkOf("javascript:alert(1)"), null);
+  assert.deepEqual(payLinksOf({ monthly: "https://pag.ae/1", yearly: "" , extra: "https://x.com" }), { monthly: "https://pag.ae/1" });
+  assert.equal(payLinksOf({ monthly: "https://x.com/1" }), null);
+  assert.deepEqual(payLinksOf(undefined), {});
+});

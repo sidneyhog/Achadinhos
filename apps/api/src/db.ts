@@ -44,6 +44,7 @@ export const migrate = async () => {
   await pool.query(`
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS benefits TEXT NOT NULL DEFAULT '';
+    ALTER TABLE plans ADD COLUMN IF NOT EXISTS pay_links JSONB NOT NULL DEFAULT '{}'::jsonb;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS quarterly_cents INTEGER;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS semiannual_cents INTEGER;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS max_posts_per_month INTEGER;

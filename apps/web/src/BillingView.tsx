@@ -3,9 +3,11 @@ import { api } from "./api";
 
 type Invoice = { id: number; amountCents: number; cycle: string; status: string; provider: string; qrText: string; qrImage: string; expiresAt: string | null; paidAt: string | null };
 type Billing = {
-  provider: "pagbank" | "efi" | null;
+  provider: "pagbank" | "efi" | "link" | null;
+  /** Pagamento pelo link do PagBank esperando o super admin confirmar. */
+  awaiting: { id: number; amountCents: number; cycle: string; createdAt: string; link: string } | null;
   plan: { slug: string; name: string; prices: Record<string, number | null> };
-  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null> }>;
+  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null>; links?: Record<string, boolean> }>;
   subscription: { status: string; cycle: string | null; trialEndsAt: string | null; currentPeriodEnd: string | null; companyStatus: string };
   taxIdHint: string;
   open: Invoice | null;
@@ -71,8 +73,14 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   const pay = async () => {
     setBusy(true);
     try {
-      const result = await api<{ configured: boolean; message?: string; invoice?: Invoice }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId, planSlug }) });
+      const result = await api<{ configured: boolean; message?: string; invoice?: Invoice; provider?: string; link?: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId, planSlug }) });
       if (!result.configured) { tell("Pagamento", result.message || "O pagamento online ainda não está ativo.", "bad"); return; }
+      if (result.provider === "link" && result.link) {
+        // Vai para a página do PagBank na mesma aba: nova aba depois de um await é bloqueada pelo navegador (celular).
+        // O plano é liberado quando o pagamento for confirmado; na volta, a tela mostra "Aguardando confirmação".
+        window.location.assign(result.link);
+        return;
+      }
       if (result.invoice) { setInvoice(result.invoice); setPaidUntil(null); }
     } catch (err) {
       tell("Não gerou o Pix", err instanceof Error ? err.message : "Falha", "bad");
@@ -101,6 +109,7 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   // Plano escolhido na hora de pagar: o Pix sai com o preço dele, e a troca só vale quando o pagamento é confirmado.
   const chosen = data.plans?.find((plan) => plan.slug === planSlug) || { ...data.plan, maxGroups: null, maxConnections: null };
   const changing = chosen.slug !== data.plan.slug;
+  const byLink = Boolean((chosen as { links?: Record<string, boolean> }).links?.[cycle]);
   const limits = (plan: { maxGroups: number | null; maxConnections: number | null }) =>
     [plan.maxGroups == null ? "grupos sem limite" : `${plan.maxGroups} grupo${plan.maxGroups === 1 ? "" : "s"}`, plan.maxConnections == null ? "conexões sem limite" : `${plan.maxConnections} conex${plan.maxConnections === 1 ? "ão" : "ões"}`].join(" · ");
   const pickPlan = (slug: string) => {
@@ -111,7 +120,7 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
 
   return (
     <section className="aff-block" style={{ maxWidth: 560 }}>
-      <header className="aff-guide__head"><h2>Minha assinatura</h2><p>Pague com Pix e a liberação é na hora.</p></header>
+      <header className="aff-guide__head"><h2>Minha assinatura</h2><p>{data?.provider === "link" ? "Pague com Pix, cartão ou boleto pelo PagBank." : "Pague com Pix e a liberação é na hora."}</p></header>
       <div className="aff-prefs">
         <div className={`aff-wastate ${sub.companyStatus === "suspended" || late ? "is-off" : sub.status === "active" ? "is-on" : "is-qr"}`}>
           <strong>{data.plan.name} · {statusText}</strong>
@@ -122,6 +131,13 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
           <div className="aff-wastate is-on">
             <strong>✅ Pagamento confirmado!</strong>
             <span>Obrigado. Sua assinatura está ativa{paidUntil ? ` até ${day(paidUntil)}` : ""}.</span>
+          </div>
+        ) : null}
+
+        {data.awaiting && invoice?.status !== "paid" ? (
+          <div className="aff-wastate is-qr">
+            <strong>⏳ Aguardando confirmação do pagamento</strong>
+            <span>{money(data.awaiting.amountCents)} · {cycleName(data.awaiting.cycle)}. Assim que o pagamento no PagBank for confirmado, o plano é liberado. Ainda não pagou? <a href={data.awaiting.link} target="_blank" rel="noopener noreferrer">Abrir o PagBank de novo</a>.</span>
           </div>
         ) : null}
 
@@ -156,14 +172,26 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
                 {CYCLES.filter(([key]) => chosen.prices[key] != null).map(([key, label]) => <option key={key} value={key}>{label} · {money(Number(chosen.prices[key]))}</option>)}
               </select>
             </label>
-            {data.provider === "pagbank" ? (
+            {data.provider === "pagbank" && !byLink ? (
               <label>CPF ou CNPJ de quem paga<input inputMode="numeric" value={taxId} placeholder={data.taxIdHint || "000.000.000-00"} onChange={(event) => setTaxId(event.target.value)} /></label>
             ) : null}
-            <label>Cupom (opcional)<input value={coupon} onChange={(event) => setCoupon(event.target.value.toUpperCase())} /></label>
-            <small>{data.taxIdHint ? "Em branco usa o CPF/CNPJ já informado. " : ""}O PagBank exige o documento de quem paga.</small>
-            <div className="aff-conn__actions">
-              <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Gerando Pix…" : "Pagar com Pix"}</button>
-            </div>
+            {byLink ? (
+              <>
+                <small>Você paga na página segura do PagBank: <b>Pix, cartão de crédito ou boleto</b>. A liberação do plano acontece quando o pagamento for confirmado.</small>
+                <div className="aff-conn__actions">
+                  <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Abrindo…" : "Pagar no PagBank"}</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label>Cupom (opcional)<input value={coupon} onChange={(event) => setCoupon(event.target.value.toUpperCase())} /></label>
+                <small>{data.taxIdHint ? "Em branco usa o CPF/CNPJ já informado. " : ""}O PagBank exige o documento de quem paga.</small>
+                <div className="aff-conn__actions">
+                  <button type="button" className="is-solid" disabled={busy || data.provider === "link"} onClick={pay}>{busy ? "Gerando Pix…" : "Pagar com Pix"}</button>
+                </div>
+                {data.provider === "link" ? <small>Esse período ainda não tem pagamento online. Escolha outro período ou fale com o suporte.</small> : null}
+              </>
+            )}
           </article>
         )}
 

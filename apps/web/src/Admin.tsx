@@ -70,7 +70,7 @@ type Range = "7" | "30" | "90" | "12";
 const labelOf = (value?: string | null) => ({
   trialing: "Teste", active: "Ativa", past_due: "Vencida", canceled: "Cancelada", suspended: "Suspensa", blocked: "Bloqueada",
   pending: "Pendente", paid: "Paga", monthly: "Mensal", quarterly: "Trimestral", semiannual: "Semestral", yearly: "Anual",
-  pix: "PIX", card: "Cartão", boleto: "Boleto", open: "Aberto", sent: "Enviado", failed: "Falhou", read: "Lido", panel: "Painel", email: "E-mail",
+  pix: "PIX", card: "Cartão", boleto: "Boleto", link: "Link PagBank", open: "Aberto", sent: "Enviado", failed: "Falhou", read: "Lido", panel: "Painel", email: "E-mail",
   connected: "Conectado", qrcode: "QR pendente", opening: "Conectando", close: "Desconectado", disconnected: "Desconectado"
 } as Record<string, string>)[String(value || "")] || (value || "—");
 
@@ -99,7 +99,8 @@ const toneOf = (status?: string | null) => {
 
 const blankPlan = {
   id: 0, name: "", slug: "", description: "", benefits: "", monthly: "", quarterly: "", semiannual: "", yearly: "", trial: "7",
-  connections: "", groups: "", stores: "", posts: "", postsMonth: "", users: "", sort: "0", api: false, priority: false, active: true
+  connections: "", groups: "", stores: "", posts: "", postsMonth: "", users: "", sort: "0", api: false, priority: false, active: true,
+  links: { monthly: "", quarterly: "", semiannual: "", yearly: "" } as Record<string, string>
 };
 
 const ICONS: Record<View, string> = {
@@ -266,7 +267,8 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
       sort: String(plan.sort_order || 0),
       api: Boolean(features.api),
       priority: Boolean(features.prioritySupport),
-      active: plan.active !== false
+      active: plan.active !== false,
+      links: { monthly: "", quarterly: "", semiannual: "", yearly: "", ...(plan.pay_links || {}) }
     });
   };
 
@@ -292,7 +294,8 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
       sortOrder: 0,
       api: planOpen.api,
       prioritySupport: planOpen.priority,
-      active: planOpen.active
+      active: planOpen.active,
+      payLinks: planOpen.links
     };
     const ok = await run(planOpen.id ? "Salvo" : "Criado", planOpen.id ? "O plano foi atualizado." : "O plano foi criado.", () =>
       api(planOpen.id ? `/api/admin/plans/${planOpen.id}` : "/api/admin/plans", { method: planOpen.id ? "PATCH" : "POST", body: JSON.stringify(body) })
@@ -600,10 +603,15 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
               </section>
               <div className="sx-filters">
                 <select value={payStatus} onChange={(event) => setPayStatus(event.target.value)} aria-label="Status"><option value="">Todos os status</option><option value="paid">Paga</option><option value="pending">Pendente</option></select>
-                <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)} aria-label="Método"><option value="">Todos os métodos</option><option value="pix">PIX</option><option value="card">Cartão</option><option value="boleto">Boleto</option></select>
+                <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)} aria-label="Método"><option value="">Todos os métodos</option><option value="pix">PIX</option><option value="card">Cartão</option><option value="boleto">Boleto</option><option value="link">Link PagBank</option></select>
                 <select value={payPeriod} onChange={(event) => setPayPeriod(event.target.value)} aria-label="Período"><option value="">Todo o período</option><option value="today">Hoje</option><option value="month">Este mês</option><option value="year">Este ano</option></select>
               </div>
-              <PayTable rows={payRows} />
+              <PayTable rows={payRows} onConfirm={(row) => setAsk({
+                title: "Confirmar pagamento",
+                text: `Confirme só depois de ver no app do PagBank a venda de ${money(row.amount_cents)} de ${row.company}. O plano é liberado na hora.`,
+                confirm: "Confirmar e liberar",
+                run: async () => { await run("Pagamento confirmado", `${row.company} foi liberada.`, () => api(`/api/admin/invoices/${row.id}/confirm`, { method: "POST" })); }
+              })} />
             </>
           ) : null}
 
@@ -1062,6 +1070,13 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label className="sx-check"><input type="checkbox" checked={planOpen.api} onChange={(event) => setPlanOpen({ ...planOpen, api: event.target.checked })} /> API liberada</label>
                 <label className="sx-check"><input type="checkbox" checked={planOpen.priority} onChange={(event) => setPlanOpen({ ...planOpen, priority: event.target.checked })} /> Suporte prioritário</label>
                 <label className="sx-check"><input type="checkbox" checked={planOpen.active} onChange={(event) => setPlanOpen({ ...planOpen, active: event.target.checked })} /> Plano ativo na landing</label>
+                <p className="is-wide" style={{ margin: "8px 0 0", fontSize: 13, color: "#64748b" }}>
+                  <b>Links de pagamento do PagBank</b> (opcional). Com o link preenchido, o cliente paga na página do PagBank (Pix, cartão ou boleto)
+                  e você confirma em Pagamentos. Crie em minhaconta.pagbank.com.br → Venda online → Link de pagamento, com o mesmo valor do período.
+                </p>
+                {([["monthly", "Link mensal"], ["quarterly", "Link trimestral"], ["semiannual", "Link semestral"], ["yearly", "Link anual"]] as const).map(([key, label]) => (
+                  <label key={key} className="is-wide">{label}<input value={planOpen.links[key] || ""} inputMode="url" placeholder="https://pag.ae/..." onChange={(event) => setPlanOpen({ ...planOpen, links: { ...planOpen.links, [key]: event.target.value } })} /></label>
+                ))}
               </div>
             </div>
             <footer className="sx-drawer__foot"><button type="button" className="sx-btn" onClick={() => setPlanOpen(null)}>Cancelar</button><button type="button" className="sx-btn is-solid" onClick={savePlan}>Salvar</button></footer>
@@ -1167,14 +1182,18 @@ function Trend({ rows, field, dark, ink, grid, tip, moneyMode = false, bars = fa
   );
 }
 
-function PayTable({ rows }: { rows: any[] }) {
+function PayTable({ rows, onConfirm }: { rows: any[]; onConfirm?: (row: any) => void }) {
   return (
     <div className="sx-tablewrap">
       <table className="sx-table">
-        <thead><tr><th>Empresa</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th>{onConfirm ? <th></th> : null}</tr></thead>
         <tbody>
           {rows.map((row: any) => (
-            <tr key={row.id}><td>{row.company}</td><td>{money(row.amount_cents)}</td><td>{labelOf(row.method)}</td><td><Badge tone={toneOf(row.status)}>{labelOf(row.status)}</Badge></td><td>{when(row.paid_at || row.created_at)}</td></tr>
+            <tr key={row.id}>
+              <td>{row.company}{row.plan ? <small style={{ display: "block", color: "#64748b" }}>{row.plan} · {labelOf(row.cycle)}</small> : null}</td>
+              <td>{money(row.amount_cents)}</td><td>{labelOf(row.method)}</td><td><Badge tone={toneOf(row.status)}>{row.provider === "link" && row.status === "pending" ? "Aguardando confirmação" : labelOf(row.status)}</Badge></td><td>{when(row.paid_at || row.created_at)}</td>
+              {onConfirm ? <td>{row.provider === "link" && row.status === "pending" ? <button type="button" className="sx-btn is-solid" onClick={() => onConfirm(row)}>Confirmar pagamento</button> : null}</td> : null}
+            </tr>
           ))}
         </tbody>
       </table>
