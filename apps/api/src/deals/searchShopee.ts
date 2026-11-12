@@ -13,6 +13,29 @@ export const shopeeTransientError = (error: unknown): boolean => {
 };
 
 /**
+ * Buscas que o robô alterna quando a empresa não tem campanha da Shopee. Antes era sempre "oferta", página 1,
+ * 5 produtos: a mesma lista toda vez, e depois de alguns dias a regra de repetição barrava tudo (11/11/2026).
+ */
+export const SHOPEE_KEYWORDS = [
+  "cozinha", "organizador", "fone bluetooth", "carregador", "capinha celular", "smartwatch", "maquiagem",
+  "skincare", "perfume", "camiseta", "tênis", "bolsa", "relógio", "brinquedo", "pet", "ferramenta",
+  "decoração", "luminária", "jogo de cama", "toalha", "garrafa térmica", "academia", "bebê", "papelaria",
+  "panela", "ventilador", "limpeza", "banheiro", "cabelo", "óculos de sol", "mochila", "jardim"
+];
+const SHOPEE_PAGES = 3;
+const SHOPEE_LIMIT = 20;
+
+/** Escolhe a busca desta rodada: a campanha (se houver) ou uma palavra da lista, numa página de 1 a 3. Exportada para teste. */
+export const shopeeSearchPlan = (query: string, random: () => number = Math.random) => {
+  const custom = query.replace(/"/g, "").trim();
+  const keyword = custom && custom.toLowerCase() !== "oferta"
+    ? custom
+    : SHOPEE_KEYWORDS[Math.floor(random() * SHOPEE_KEYWORDS.length) % SHOPEE_KEYWORDS.length];
+  const page = 1 + (Math.floor(random() * SHOPEE_PAGES) % SHOPEE_PAGES);
+  return { keyword, page };
+};
+
+/**
  * API oficial de afiliados Shopee (GraphQL productOfferV2).
  * Exige App ID e segredo do painel de afiliados.
  */
@@ -21,10 +44,10 @@ export const searchShopee = async (opts: {
   appId: string;
   secret: string;
 }): Promise<DealOffer[]> => {
-  const keyword = opts.query.replace(/"/g, "");
+  const { keyword, page } = shopeeSearchPlan(opts.query);
   const body = JSON.stringify({
     query: `{
-      productOfferV2(keyword: "${keyword}", listType: 0, sortType: 2, page: 1, limit: 5) {
+      productOfferV2(keyword: "${keyword}", listType: 0, sortType: 2, page: ${page}, limit: ${SHOPEE_LIMIT}) {
         nodes {
           itemId
           productName
@@ -93,6 +116,7 @@ export const searchShopee = async (opts: {
         priceCents: Math.round(price * 100),
         url,
         imageUrl: node?.imageUrl ? String(node.imageUrl) : undefined,
+        category: keyword,
         marketplace: "shopee"
       };
     })

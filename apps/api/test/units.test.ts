@@ -788,3 +788,13 @@ test("Shopee: erro 10000 (System Error) é passageiro; credencial errada não", 
   assert.equal(shopeeTransientError({ message: "Invalid Signature", extensions: { code: 10020 } }), false);
   assert.equal(shopeeTransientError(null), false);
 });
+
+test("Shopee: sem campanha, a busca varia de palavra e de página", async () => {
+  const { shopeeSearchPlan, SHOPEE_KEYWORDS } = await import("../src/deals/searchShopee");
+  const plans = Array.from({ length: 40 }, () => shopeeSearchPlan("oferta"));
+  assert.ok(new Set(plans.map(plan => plan.keyword)).size > 5);
+  assert.ok(plans.every(plan => SHOPEE_KEYWORDS.includes(plan.keyword) && plan.page >= 1 && plan.page <= 3));
+  assert.equal(shopeeSearchPlan("Natal", () => 0.99).keyword, "Natal");
+  assert.equal(shopeeSearchPlan('air "fryer"', () => 0).keyword, "air fryer");
+  assert.equal(shopeeSearchPlan("", () => 0.999999).page, 3);
+});
