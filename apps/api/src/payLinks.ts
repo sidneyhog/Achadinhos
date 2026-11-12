@@ -42,6 +42,16 @@ export const payLinkOf = (value: unknown): string | null => {
   }
 };
 
+/** Link de cobrança Pix do Nubank (nubank.com.br/cobrar/...): a tela fala em Pix, não em PagBank. */
+export const isNubankLink = (value: string) => {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "nubank.com.br" || host.endsWith(".nubank.com.br");
+  } catch {
+    return false;
+  }
+};
+
 /** Links/códigos por período; null se algum for inválido (o painel mostra o erro em vez de gravar calado). */
 export const payLinksOf = (value: unknown): Record<string, string> | null => {
   const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;

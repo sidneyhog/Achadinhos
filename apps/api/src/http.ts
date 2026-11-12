@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
 import { audit, one, q, withTransaction } from "./db";
 import { decrypt, encrypt } from "./secrets";
 import { createBoleto, createCard, createPix, efiConfigured, testEfiConnection } from "./efi";
-import { isPixCode, payLinksOf } from "./payLinks";
+import { isNubankLink, isPixCode, payLinksOf } from "./payLinks";
 import { createPagbankPix, getPagbankOrder, loadPagbank, pagbankError, testPagbank } from "./pagbank";
 import { loadEfiRuntime, loadPlatform } from "./platform";
 import { stopSession } from "./zapo/session";
@@ -2248,7 +2248,7 @@ app.get("/api/billing", auth, async (req, res, next) => {
         maxConnections: plan.max_connections,
         prices: { monthly: plan.monthly_cents, quarterly: plan.quarterly_cents, semiannual: plan.semiannual_cents, yearly: plan.yearly_cents },
         // "pix" = copia e cola mostrado aqui; "page" = página do PagBank. O conteúdo só sai no checkout.
-        links: Object.fromEntries(Object.entries(plan.pay_links || {}).map(([cycle, link]) => [cycle, isPixCode(String(link)) ? "pix" : "page"]))
+        links: Object.fromEntries(Object.entries(plan.pay_links || {}).map(([cycle, link]) => [cycle, isPixCode(String(link)) ? "pix" : isNubankLink(String(link)) ? "nubank" : "page"]))
       })),
       subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status },
       taxIdHint: digits ? `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}` : "",

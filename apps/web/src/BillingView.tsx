@@ -8,7 +8,7 @@ type Billing = {
   /** Pagamento pelo link do PagBank esperando o super admin confirmar. */
   awaiting: { id: number; amountCents: number; cycle: string; createdAt: string; link: string } | null;
   plan: { slug: string; name: string; prices: Record<string, number | null> };
-  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null>; links?: Record<string, "pix" | "page"> }>;
+  plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null>; links?: Record<string, "pix" | "page" | "nubank"> }>;
   subscription: { status: string; cycle: string | null; trialEndsAt: string | null; currentPeriodEnd: string | null; companyStatus: string };
   taxIdHint: string;
   open: Invoice | null;
@@ -127,7 +127,7 @@ Segue o comprovante:`;
   // Plano escolhido na hora de pagar: o Pix sai com o preço dele, e a troca só vale quando o pagamento é confirmado.
   const chosen = data.plans?.find((plan) => plan.slug === planSlug) || { ...data.plan, maxGroups: null, maxConnections: null };
   const changing = chosen.slug !== data.plan.slug;
-  const linkKind = (chosen as { links?: Record<string, "pix" | "page"> }).links?.[cycle];
+  const linkKind = (chosen as { links?: Record<string, "pix" | "page" | "nubank"> }).links?.[cycle];
   const byLink = Boolean(linkKind);
   const limits = (plan: { maxGroups: number | null; maxConnections: number | null }) =>
     [plan.maxGroups == null ? "grupos sem limite" : `${plan.maxGroups} grupo${plan.maxGroups === 1 ? "" : "s"}`, plan.maxConnections == null ? "conexões sem limite" : `${plan.maxConnections} conex${plan.maxConnections === 1 ? "ão" : "ões"}`].join(" · ");
@@ -139,7 +139,7 @@ Segue o comprovante:`;
 
   return (
     <section className="aff-block" style={{ maxWidth: 560 }}>
-      <header className="aff-guide__head"><h2>Minha assinatura</h2><p>{data?.provider === "link" ? "Pague com Pix, cartão ou boleto pelo PagBank." : "Pague com Pix e a liberação é na hora."}</p></header>
+      <header className="aff-guide__head"><h2>Minha assinatura</h2><p>{data?.provider === "link" ? "Pague com Pix e mande o comprovante no WhatsApp." : "Pague com Pix e a liberação é na hora."}</p></header>
       <div className="aff-prefs">
         <div className={`aff-wastate ${sub.companyStatus === "suspended" || late ? "is-off" : sub.status === "active" ? "is-on" : "is-qr"}`}>
           <strong>{data.plan.name} · {statusText}</strong>
@@ -162,7 +162,7 @@ Segue o comprovante:`;
             </div>
             <span>Ainda não pagou? {data.awaiting.link.startsWith("000201")
               ? <button type="button" className="aff-linkbtn" onClick={() => copy(data.awaiting!.link)}>Copiar o código Pix de novo</button>
-              : <a href={data.awaiting.link} target="_blank" rel="noopener noreferrer">Abrir o PagBank de novo</a>}.</span>
+              : <a href={data.awaiting.link} target="_blank" rel="noopener noreferrer">Abrir o pagamento de novo</a>}.</span>
           </div>
         ) : null}
 
@@ -216,11 +216,11 @@ Segue o comprovante:`;
             ) : null}
             {byLink ? (
               <>
-                <small>{linkKind === "pix"
-                  ? <>Você paga com <b>Pix</b> pelo app do seu banco. A liberação do plano acontece quando o pagamento for conferido.</>
+                <small>{linkKind === "pix" || linkKind === "nubank"
+                  ? <>Você paga com <b>Pix</b> pelo app de qualquer banco{linkKind === "nubank" ? " (abre a página de cobrança do Nubank)" : ""}. Depois, é só mandar o comprovante no WhatsApp e o plano é liberado assim que conferirmos.</>
                   : <>Você paga na página segura do PagBank: <b>Pix, cartão de crédito ou boleto</b>. A liberação do plano acontece quando o pagamento for confirmado.</>}</small>
                 <div className="aff-conn__actions">
-                  <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Abrindo…" : linkKind === "pix" ? "Pagar com Pix" : "Pagar no PagBank"}</button>
+                  <button type="button" className="is-solid" disabled={busy} onClick={pay}>{busy ? "Abrindo…" : linkKind === "pix" || linkKind === "nubank" ? "Pagar com Pix" : "Pagar no PagBank"}</button>
                 </div>
               </>
             ) : (
