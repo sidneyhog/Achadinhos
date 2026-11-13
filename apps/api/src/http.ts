@@ -542,8 +542,8 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
   try {
     const [metrics] = await q(
       `SELECT
-         count(*) FILTER (WHERE c.status = 'active' AND coalesce(s.status, '') = 'active')::int AS active_paid,
-         count(*) FILTER (WHERE coalesce(s.status, '') = 'trialing' AND c.status <> 'blocked')::int AS trialing,
+         count(*) FILTER (WHERE c.status = 'active' AND NOT c.courtesy AND coalesce(s.status, '') = 'active')::int AS active_paid,
+         count(*) FILTER (WHERE coalesce(s.status, '') = 'trialing' AND NOT c.courtesy AND c.status <> 'blocked')::int AS trialing,
          count(*) FILTER (WHERE c.status = 'blocked')::int AS blocked,
          count(*) FILTER (WHERE c.status = 'suspended' AND coalesce(s.status, '') <> 'canceled')::int AS suspended,
          count(*) FILTER (WHERE coalesce(s.status, '') = 'canceled')::int AS canceled,
@@ -556,7 +556,7 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
          (SELECT coalesce(sum(click_count), 0)::int FROM posts WHERE created_at >= date_trunc('day', now())) AS clicks_today,
          (SELECT coalesce(sum(amount_cents), 0)::int FROM invoices WHERE status = 'paid' AND paid_at >= date_trunc('month', now())) AS revenue_month,
          (SELECT coalesce(sum(amount_cents), 0)::int FROM invoices WHERE status = 'paid' AND paid_at >= date_trunc('year', now())) AS revenue_year,
-         (SELECT coalesce(sum(p.monthly_cents), 0)::int FROM subscriptions s2 JOIN plans p ON p.id = s2.plan_id JOIN companies c2 ON c2.id = s2.company_id WHERE c2.status = 'active' AND s2.status = 'active') AS revenue_forecast,
+         (SELECT coalesce(sum(p.monthly_cents), 0)::int FROM subscriptions s2 JOIN plans p ON p.id = s2.plan_id JOIN companies c2 ON c2.id = s2.company_id WHERE c2.status = 'active' AND NOT c2.courtesy AND s2.status = 'active') AS revenue_forecast,
          (SELECT count(DISTINCT company_id)::int FROM invoices WHERE status = 'paid') AS paid_companies,
          (SELECT count(*)::int FROM companies) AS companies
        FROM companies c LEFT JOIN subscriptions s ON s.company_id = c.id`

@@ -52,7 +52,8 @@ const FILTERS = [
   ["active", "Ativas"],
   ["suspended", "Suspensas"],
   ["blocked", "Bloqueadas"],
-  ["canceled", "Canceladas"]
+  ["canceled", "Canceladas"],
+  ["courtesy", "Cortesias"]
 ] as const;
 
 const STORES: Record<string, string> = {
@@ -231,8 +232,9 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
   }), [board, planFilter, from, to, query, city, uf]);
 
   const companies = useMemo(() => searched.filter((company: any) => {
-    if (filter === "trial" && !(company.sub_status === "trialing" && company.status === "active")) return false;
-    if (filter === "active" && !(company.status === "active" && company.sub_status === "active")) return false;
+    if (filter === "courtesy" && !company.courtesy) return false;
+    if (filter === "trial" && !(!company.courtesy && company.sub_status === "trialing" && company.status === "active")) return false;
+    if (filter === "active" && !(!company.courtesy && company.status === "active" && company.sub_status === "active")) return false;
     if (filter === "suspended" && !(company.status === "suspended" && company.sub_status !== "canceled")) return false;
     if (filter === "blocked" && company.status !== "blocked") return false;
     if (filter === "canceled" && company.sub_status !== "canceled") return false;
@@ -356,8 +358,9 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
     }, 0);
   }, [board, searched]);
 
-  const trialCount = searched.filter((company: any) => company.sub_status === "trialing" && company.status === "active").length;
-  const payingCount = searched.filter((company: any) => company.status === "active" && company.sub_status === "active").length;
+  const trialCount = searched.filter((company: any) => !company.courtesy && company.sub_status === "trialing" && company.status === "active").length;
+  const payingCount = searched.filter((company: any) => !company.courtesy && company.status === "active" && company.sub_status === "active").length;
+  const courtesyCount = searched.filter((company: any) => company.courtesy).length;
   const suspendedCount = searched.filter((company: any) => company.status === "suspended" && company.sub_status !== "canceled").length;
 
   const payRows = invoices.filter((row: any) => {
@@ -478,11 +481,9 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <article className="sx-kpi"><span>WhatsApps conectados</span><strong>{num(metrics.whatsapps || 0)}</strong><em>{num(metrics.groups || 0)} grupos no total</em></article>
               </section>
               <section className="sx-stats">
-                <article className="sx-stat is-trial"><span>Trial</span><strong>{num(metrics.trialing || 0)}</strong></article>
-                <article className="sx-stat is-active"><span>Ativas</span><strong>{num(metrics.active_paid || 0)}</strong></article>
-                <article className="sx-stat is-suspended"><span>Suspensas</span><strong>{num(metrics.suspended || 0)}</strong></article>
-                <article className="sx-stat is-blocked"><span>Bloqueadas</span><strong>{num(metrics.blocked || 0)}</strong></article>
-                <article className="sx-stat is-canceled"><span>Canceladas</span><strong>{num(metrics.canceled || 0)}</strong></article>
+                {([["trial", "is-trial", "Trial", metrics.trialing], ["active", "is-active", "Ativas (pagantes)", metrics.active_paid], ["courtesy", "is-courtesy", "Cortesias", metrics.courtesy], ["suspended", "is-suspended", "Suspensas", metrics.suspended], ["blocked", "is-blocked", "Bloqueadas", metrics.blocked], ["canceled", "is-canceled", "Canceladas", metrics.canceled]] as const).map(([key, tone, label, value]) => (
+                  <button key={key} type="button" className={"sx-stat is-link " + tone} onClick={() => { setFilter(key); setView("companies"); }} title={"Ver empresas: " + label}><span>{label}</span><strong>{num(value || 0)}</strong></button>
+                ))}
               </section>
               <section className="sx-split">
                 <article className="sx-card"><span>Conversão teste → pago</span><strong style={{ fontSize: 36, letterSpacing: "-0.05em" }}>{total ? `${conversion}%` : "—"}</strong><p className="sx-note">{paid} de {total} empresas com pelo menos uma fatura paga</p></article>
@@ -514,10 +515,9 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <button type="button" className="sx-btn is-solid" onClick={() => setCreateOpen(true)}>+ Nova empresa</button>
               </div>
               <section className="sx-stats">
-                <article className="sx-stat"><span>Total</span><strong>{num(searched.length)}</strong></article>
-                <article className="sx-stat is-trial"><span>Trial</span><strong>{num(trialCount)}</strong></article>
-                <article className="sx-stat is-active"><span>Pagantes</span><strong>{num(payingCount)}</strong></article>
-                <article className="sx-stat is-suspended"><span>Suspensas</span><strong>{num(suspendedCount)}</strong></article>
+                {([["all", "", "Total", searched.length], ["trial", "is-trial", "Trial", trialCount], ["active", "is-active", "Pagantes", payingCount], ["courtesy", "is-courtesy", "Cortesias", courtesyCount], ["suspended", "is-suspended", "Suspensas", suspendedCount]] as const).map(([key, tone, label, value]) => (
+                  <button key={key} type="button" className={"sx-stat is-link " + tone + (filter === key ? " is-picked" : "")} onClick={() => setFilter(key)}><span>{label}</span><strong>{num(value)}</strong></button>
+                ))}
                 <article className="sx-stat"><span>MRR</span><strong>{money(mrr)}</strong></article>
               </section>
               <div className="sx-filters">
@@ -986,7 +986,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label>Status<select name="status" defaultValue={detail.status === "blocked" || detail.status === "suspended" ? detail.status : "active"}><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></label>
                 <label>Assinatura<select name="subStatus" defaultValue={detail.sub_status || "trialing"}><option value="trialing">Teste</option><option value="active">Paga</option><option value="canceled">Cancelada</option></select></label>
                 <label>Validade<input type="date" name="validUntil" defaultValue={String(detail.current_period_end || detail.trial_ends_at || "").slice(0, 10)} /></label>
-                <label className="sx-courtesy is-wide"><input type="checkbox" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /><span><b>Cortesia (não cobrar)</b><small>Não vence nem é suspensa. Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</small></span></label>
+                <label className="sx-courtesy is-wide"><input type="checkbox" role="switch" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /><i aria-hidden="true" /><span><b>Cortesia (não cobrar)</b><small>Não vence nem é suspensa. Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</small></span></label>
                 <div className="is-wide"><button className="sx-btn is-solid" type="submit">Salvar</button></div>
               </form>
             </div>
