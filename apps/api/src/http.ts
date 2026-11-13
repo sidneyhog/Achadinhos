@@ -429,6 +429,7 @@ app.patch("/api/admin/companies/:id", auth, admin, async (req, res) => {
       await q("UPDATE companies SET courtesy = $2, updated_at = now() WHERE id = $1", [id, courtesy]);
       if (courtesy) {
         await q("UPDATE subscriptions SET status = 'active', updated_at = now() WHERE company_id = $1 AND status <> 'canceled'", [id]);
+        await q("UPDATE notices SET read_at = now() WHERE company_id = $1 AND kind LIKE 'due_%' AND read_at IS NULL", [id]);
         if (!hasStatus) await q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [id]);
       } else {
         // Deixou de ser cortesia: passa a ser cobrada a partir de agora (a validade do formulário, se vier, vale por cima).
@@ -2617,7 +2618,12 @@ app.get("/go/:token", async (req, res) => {
 
 app.get("/api/notices", auth, async (req, res) => {
   const companyId = companyIdOf(req);
-  const rows = await q("SELECT id, title, body, status, channel, detail, created_at FROM notices WHERE company_id = $1 AND read_at IS NULL ORDER BY id DESC LIMIT 10", [companyId]);
+  // Cortesia não vê aviso de vencimento (nem os criados antes de virar cortesia).
+  const rows = await q(
+    `SELECT n.id, n.title, n.body, n.status, n.channel, n.detail, n.created_at FROM notices n JOIN companies c ON c.id = n.company_id
+     WHERE n.company_id = $1 AND n.read_at IS NULL AND NOT (c.courtesy AND n.kind LIKE 'due_%') ORDER BY n.id DESC LIMIT 10`,
+    [companyId]
+  );
   res.json({ notices: rows });
 });
 
