@@ -986,7 +986,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label>Status<select name="status" defaultValue={detail.status === "blocked" || detail.status === "suspended" ? detail.status : "active"}><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></label>
                 <label>Assinatura<select name="subStatus" defaultValue={detail.sub_status || "trialing"}><option value="trialing">Teste</option><option value="active">Paga</option><option value="canceled">Cancelada</option></select></label>
                 <label>Validade<input type="date" name="validUntil" defaultValue={String(detail.current_period_end || detail.trial_ends_at || "").slice(0, 10)} /></label>
-                <label className="sx-check is-wide"><input type="checkbox" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /> Cortesia: não cobrar esta empresa (não vence nem é suspensa). Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</label>
+                <label className="sx-courtesy is-wide"><input type="checkbox" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /><span><b>Cortesia (não cobrar)</b><small>Não vence nem é suspensa. Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</small></span></label>
                 <div className="is-wide"><button className="sx-btn is-solid" type="submit">Salvar</button></div>
               </form>
             </div>

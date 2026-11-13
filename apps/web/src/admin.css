@@ -412,3 +412,11 @@ button.sx-alert { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .sx-dot.is-live, .sx-skeleton, .sx-drawer__panel { animation: none; }
 }
+
+/* Cortesia: caixa grande e o cartão inteiro clicável (a caixa padrão ficava minúscula). */
+.sx-form label.sx-courtesy { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--line, #e2e8f0); border-radius: 12px; cursor: pointer; color: var(--text, inherit); }
+.sx-form label.sx-courtesy:has(input:checked) { border-color: var(--primary, #635bff); background: rgba(99, 91, 255, .08); }
+.sx-courtesy input { width: 24px; height: 24px; flex: 0 0 24px; margin: 0; accent-color: var(--primary, #635bff); cursor: pointer; }
+.sx-courtesy span { display: grid; gap: 4px; }
+.sx-courtesy b { font-size: 15px; }
+.sx-courtesy small { font-size: 12px; font-weight: 500; color: var(--muted); }
