@@ -337,7 +337,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
   const waRows = board?.whatsapp || [];
   const waOff = waRows.filter((row: any) => row.status !== "connected" && row.status !== "qrcode");
   const invoices = board?.invoices || [];
-  const pendingInvoices = invoices.filter((row: any) => row.status !== "paid");
+  const pendingInvoices = invoices.filter((row: any) => row.status === "pending");
   const companyCount = (board?.companies || []).length;
   const pendingCount = pendingInvoices.length;
   const logCount = (board?.logs || []).length;
