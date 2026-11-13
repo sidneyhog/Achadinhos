@@ -432,3 +432,8 @@ button.sx-stat { font: inherit; text-align: left; color: inherit; cursor: pointe
 button.sx-stat:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15, 23, 42, .08); }
 button.sx-stat.is-picked { outline: 2px solid var(--primary, #635bff); }
 .sx-stat.is-courtesy { border-top-color: #8b5cf6; }
+.sx-courtesy em { font-style: normal; font-size: 11px; font-weight: 800; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; margin-left: 6px; }
+.sx-courtesy__on { display: none; background: var(--primary, #635bff); color: #fff; }
+.sx-courtesy__off { background: #e2e8f0; color: #475569; }
+.sx-courtesy input:checked ~ span .sx-courtesy__on { display: inline-block; }
+.sx-courtesy input:checked ~ span .sx-courtesy__off { display: none; }

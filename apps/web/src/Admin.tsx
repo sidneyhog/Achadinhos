@@ -967,7 +967,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <article><span>Publicações</span><strong>{num(detail.posts)}</strong></article>
                 <article><span>Cliques</span><strong>{num(detail.clicks)}</strong></article>
               </div>
-              <form className="sx-form" key={`${detail.id}-${detail.updated || detail.plan_slug}-${detail.status}-${detail.sub_status}`} onSubmit={async (event) => {
+              <form className="sx-form" key={`${detail.id}-${detail.updated || detail.plan_slug}-${detail.status}-${detail.sub_status}-${detail.courtesy ? 1 : 0}-${detail.current_period_end || ""}`} onSubmit={async (event) => {
                 event.preventDefault();
                 const data = new FormData(event.currentTarget);
                 const ok = await run("Salvo", `${detail.name} foi atualizada.`, () => api(`/api/admin/companies/${detail.id}`, { method: "PATCH", body: JSON.stringify({
@@ -986,7 +986,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label>Status<select name="status" defaultValue={detail.status === "blocked" || detail.status === "suspended" ? detail.status : "active"}><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></label>
                 <label>Assinatura<select name="subStatus" defaultValue={detail.sub_status || "trialing"}><option value="trialing">Teste</option><option value="active">Paga</option><option value="canceled">Cancelada</option></select></label>
                 <label>Validade<input type="date" name="validUntil" defaultValue={String(detail.current_period_end || detail.trial_ends_at || "").slice(0, 10)} /></label>
-                <label className="sx-courtesy is-wide"><input type="checkbox" role="switch" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /><i aria-hidden="true" /><span><b>Cortesia (não cobrar)</b><small>Não vence nem é suspensa. Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</small></span></label>
+                <label className="sx-courtesy is-wide"><input type="checkbox" role="switch" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /><i aria-hidden="true" /><span><b>Cortesia (não cobrar) <em className="sx-courtesy__on">LIGADA</em><em className="sx-courtesy__off">DESLIGADA</em></b><small>Não vence nem é suspensa. Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</small></span></label>
                 <div className="is-wide"><button className="sx-btn is-solid" type="submit">Salvar</button></div>
               </form>
             </div>
