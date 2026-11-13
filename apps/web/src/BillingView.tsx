@@ -139,7 +139,7 @@ Segue o comprovante:`;
 
   return (
     <section className="aff-block" style={{ maxWidth: 560 }}>
-      <header className="aff-guide__head"><h2>Minha assinatura</h2><p>{data?.provider === "link" ? "Pague com Pix e mande o comprovante no WhatsApp." : "Pague com Pix e a liberação é na hora."}</p></header>
+      <header className="aff-guide__head"><h2>Minha assinatura</h2><p>{data?.provider === "link" || data?.plans?.some((plan) => Object.keys(plan.links || {}).length) ? "Pague com Pix e mande o comprovante no WhatsApp." : "Pague com Pix e a liberação é na hora."}</p></header>
       <div className="aff-prefs">
         <div className={`aff-wastate ${sub.companyStatus === "suspended" || late ? "is-off" : sub.status === "active" ? "is-on" : "is-qr"}`}>
           <strong>{data.plan.name} · {statusText}</strong>

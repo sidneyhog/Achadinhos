@@ -70,7 +70,7 @@ type Range = "7" | "30" | "90" | "12";
 const labelOf = (value?: string | null) => ({
   trialing: "Teste", active: "Ativa", past_due: "Vencida", canceled: "Cancelada", suspended: "Suspensa", blocked: "Bloqueada",
   pending: "Pendente", paid: "Paga", monthly: "Mensal", quarterly: "Trimestral", semiannual: "Semestral", yearly: "Anual",
-  pix: "PIX", card: "Cartão", boleto: "Boleto", link: "Link PagBank", open: "Aberto", sent: "Enviado", failed: "Falhou", read: "Lido", panel: "Painel", email: "E-mail",
+  pix: "PIX", card: "Cartão", boleto: "Boleto", link: "Link de pagamento", open: "Aberto", sent: "Enviado", failed: "Falhou", read: "Lido", panel: "Painel", email: "E-mail",
   connected: "Conectado", qrcode: "QR pendente", opening: "Conectando", close: "Desconectado", disconnected: "Desconectado"
 } as Record<string, string>)[String(value || "")] || (value || "—");
 
@@ -603,7 +603,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
               </section>
               <div className="sx-filters">
                 <select value={payStatus} onChange={(event) => setPayStatus(event.target.value)} aria-label="Status"><option value="">Todos os status</option><option value="paid">Paga</option><option value="pending">Pendente</option></select>
-                <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)} aria-label="Método"><option value="">Todos os métodos</option><option value="pix">PIX</option><option value="card">Cartão</option><option value="boleto">Boleto</option><option value="link">Link PagBank</option></select>
+                <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)} aria-label="Método"><option value="">Todos os métodos</option><option value="pix">PIX</option><option value="card">Cartão</option><option value="boleto">Boleto</option><option value="link">Link de pagamento</option></select>
                 <select value={payPeriod} onChange={(event) => setPayPeriod(event.target.value)} aria-label="Período"><option value="">Todo o período</option><option value="today">Hoje</option><option value="month">Este mês</option><option value="year">Este ano</option></select>
               </div>
               <PayTable rows={payRows} onConfirm={(row) => setAsk({
