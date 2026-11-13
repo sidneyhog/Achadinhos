@@ -34,6 +34,8 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
   const [manualPix, setManualPix] = useState<{ code: string; qrImage: string; amountCents: number; invoiceId: number } | null>(null);
   const [now, setNow] = useState(Date.now());
   const checking = useRef(false);
+  /** A cobrança acabou de abrir em outra aba: o aviso explica como voltar e mandar o comprovante. */
+  const [justOpened, setJustOpened] = useState(false);
 
   const load = async () => {
     const next = await api<Billing>("/api/billing");
@@ -75,6 +77,9 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
 
   const pay = async () => {
     setBusy(true);
+    // Cobrança por página (link): a aba nova precisa abrir já no clique, senão o navegador bloqueia (abre depois de um await).
+    const chosenLinks = (data?.plans?.find((plan) => plan.slug === planSlug) as { links?: Record<string, string> } | undefined)?.links;
+    const tab = chosenLinks?.[cycle] && chosenLinks[cycle] !== "pix" ? window.open("", "_blank") : null;
     try {
       const result = await api<{ configured: boolean; message?: string; invoice?: Invoice; provider?: string; link?: string; pix?: string; qrImage?: string; amountCents?: number; invoiceId?: number }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ cycle, coupon, taxId, planSlug }) });
       if (!result.configured) { tell("Pagamento", result.message || "O pagamento online ainda não está ativo.", "bad"); return; }
@@ -84,13 +89,22 @@ export function BillingView({ onPaid, tell }: { onPaid: () => Promise<unknown>; 
         return;
       }
       if (result.provider === "link" && result.link) {
-        // Vai para a página do PagBank na mesma aba: nova aba depois de um await é bloqueada pelo navegador (celular).
-        // O plano é liberado quando o pagamento for confirmado; na volta, a tela mostra "Aguardando confirmação".
-        window.location.assign(result.link);
+        // Abre a cobrança na aba nova; o Achadinhos fica nesta aba com o passo a passo para mandar o comprovante.
+        // Se o navegador bloqueou a aba, cai para a mesma aba (na volta, a tela mostra "Aguardando confirmação").
+        if (tab) {
+          tab.opener = null;
+          tab.location.href = result.link;
+          setJustOpened(true);
+          await load();
+        } else {
+          window.location.assign(result.link);
+        }
         return;
       }
+      tab?.close();
       if (result.invoice) { setInvoice(result.invoice); setPaidUntil(null); }
     } catch (err) {
+      tab?.close();
       tell("Não gerou o Pix", err instanceof Error ? err.message : "Falha", "bad");
     } finally {
       setBusy(false);
@@ -155,8 +169,14 @@ Segue o comprovante:`;
 
         {data.awaiting && invoice?.status !== "paid" ? (
           <div className="aff-wastate is-qr">
-            <strong>⏳ Aguardando confirmação do pagamento</strong>
-            <span>{money(data.awaiting.amountCents)} · {cycleName(data.awaiting.cycle)}. Já pagou? Mande o comprovante no WhatsApp e o plano é liberado assim que conferirmos.</span>
+            <strong>{justOpened ? "📄 A cobrança abriu em outra aba" : "⏳ Aguardando confirmação do pagamento"}</strong>
+            <span>{money(data.awaiting.amountCents)} · {cycleName(data.awaiting.cycle)}</span>
+            <ol style={{ margin: "4px 0", paddingLeft: 20, lineHeight: 1.6 }}>
+              <li>Pague com Pix na aba da cobrança, pelo app do seu banco.</li>
+              <li>Volte para esta aba do Achadinhos.</li>
+              <li>Toque em <b>Enviar comprovante no WhatsApp</b> e anexe o comprovante na conversa.</li>
+            </ol>
+            <span>O plano é liberado assim que conferirmos o pagamento.</span>
             <div className="aff-conn__actions">
               <button type="button" className="is-solid" onClick={() => sendReceipt(data.awaiting!.id, data.awaiting!.amountCents, data.awaiting!.cycle)}>Enviar comprovante no WhatsApp</button>
             </div>
