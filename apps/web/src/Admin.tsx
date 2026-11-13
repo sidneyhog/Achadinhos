@@ -350,7 +350,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
   const counts: Partial<Record<View, number>> = { companies: companyCount, payments: pendingCount, logs: logCount };
 
   const mrr = useMemo(() => {
-    const names = new Set(searched.filter((company: any) => company.sub_status === "active").map((company: any) => company.name));
+    const names = new Set(searched.filter((company: any) => company.sub_status === "active" && !company.courtesy).map((company: any) => company.name));
     return (board?.subscriptions || []).reduce((sum: number, row: any) => {
       if (row.status !== "active" || !names.has(row.company) || row.amount_cents == null) return sum;
       const split = row.cycle === "yearly" ? 12 : row.cycle === "semiannual" ? 6 : row.cycle === "quarterly" ? 3 : 1;
@@ -518,7 +518,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 {([["all", "", "Total", searched.length], ["trial", "is-trial", "Trial", trialCount], ["active", "is-active", "Pagantes", payingCount], ["courtesy", "is-courtesy", "Cortesias", courtesyCount], ["suspended", "is-suspended", "Suspensas", suspendedCount]] as const).map(([key, tone, label, value]) => (
                   <button key={key} type="button" className={"sx-stat is-link " + tone + (filter === key ? " is-picked" : "")} onClick={() => setFilter(key)}><span>{label}</span><strong>{num(value)}</strong></button>
                 ))}
-                <article className="sx-stat"><span>MRR</span><strong>{money(mrr)}</strong></article>
+                <article className="sx-stat" title="Receita recorrente mensal: soma das assinaturas pagas, convertida para valor por mês. Cortesias não entram."><span>Receita mensal (pagantes)</span><strong>{money(mrr)}</strong></article>
               </section>
               <div className="sx-filters">
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome, responsável ou e-mail" aria-label="Buscar na tabela" />
