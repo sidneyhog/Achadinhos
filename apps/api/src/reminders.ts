@@ -13,7 +13,7 @@ export const remindDue = async () => {
      FROM subscriptions s
      JOIN companies c ON c.id = s.company_id
      JOIN LATERAL (SELECT name, email FROM users WHERE company_id = c.id AND role = 'owner' ORDER BY id LIMIT 1) u ON true
-     WHERE c.status = 'active' AND s.status IN ('trialing', 'active')
+     WHERE c.status = 'active' AND NOT c.courtesy AND s.status IN ('trialing', 'active')
        AND coalesce(s.current_period_end, s.trial_ends_at) IS NOT NULL`
   );
   const mailOn = await smtpReady();

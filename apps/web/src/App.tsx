@@ -14,6 +14,7 @@ export type Session = {
     trial_ends_at: string | null;
     current_period_end: string | null;
     company_status: string;
+    courtesy?: boolean;
     company_name: string;
     tenant_id: string;
     max_connections: number | null;

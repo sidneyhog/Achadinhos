@@ -353,8 +353,9 @@ const fetchOffers = async (
   return [];
 };
 
-const subscriptionOpen = (row: { status: string; company_status: string; trial_ends_at: string | null; current_period_end: string | null; sub_status: string }) => {
+const subscriptionOpen = (row: { status: string; company_status: string; trial_ends_at: string | null; current_period_end: string | null; sub_status: string; courtesy?: boolean }) => {
   if (row.company_status !== "active") return false;
+  if (row.courtesy) return true;
   if (row.sub_status === "trialing") return !row.trial_ends_at || new Date(row.trial_ends_at) > new Date();
   if (row.sub_status === "active") return !row.current_period_end || new Date(row.current_period_end) > new Date();
   return false;
@@ -375,6 +376,7 @@ type CompanyRow = {
   sub_status: string;
   trial_ends_at: string | null;
   current_period_end: string | null;
+  courtesy: boolean;
   max_posts_per_day: number | null;
   max_posts_per_month: number | null;
 };
@@ -395,7 +397,7 @@ export const pickStartable = <T extends { id: number }>(companies: T[], running:
  */
 export const runDueDeals = async (onlyCompanyId?: number): Promise<number> => {
   const companies = await q<CompanyRow>(
-    `SELECT c.id, c.status AS company_status, s.status AS sub_status, s.trial_ends_at, s.current_period_end, p.max_posts_per_day, p.max_posts_per_month
+    `SELECT c.id, c.status AS company_status, c.courtesy, s.status AS sub_status, s.trial_ends_at, s.current_period_end, p.max_posts_per_day, p.max_posts_per_month
      FROM companies c
      JOIN subscriptions s ON s.company_id = c.id
      JOIN plans p ON p.id = s.plan_id

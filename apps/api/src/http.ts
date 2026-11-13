@@ -353,7 +353,7 @@ app.get("/api/me", auth, async (req, res) => {
   if (user.companyId) {
     subscription = await one(
       `SELECT s.status, s.trial_ends_at, s.current_period_end, s.cycle, p.name AS plan_name, p.slug,
-              p.max_connections, p.max_groups, p.max_stores, p.max_posts_per_day, p.max_posts_per_month, p.max_users, p.features, c.status AS company_status, c.name AS company_name, c.city, c.state, c.tenant_id
+              p.max_connections, p.max_groups, p.max_stores, p.max_posts_per_day, p.max_posts_per_month, p.max_users, p.features, c.status AS company_status, c.courtesy, c.name AS company_name, c.city, c.state, c.tenant_id
        FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
       [user.companyId]
     );
@@ -418,10 +418,25 @@ app.patch("/api/admin/companies/:id", auth, admin, async (req, res) => {
   const validUntil = String(req.body?.validUntil || "");
   const hasStatus = ["active", "suspended", "blocked"].includes(status);
   const hasSub = ["trialing", "active", "canceled"].includes(subStatus);
-  if (!hasStatus && !hasSub && !validUntil && !req.body?.planSlug && !req.body?.name) {
+  const courtesy = typeof req.body?.courtesy === "boolean" ? Boolean(req.body.courtesy) : null;
+  if (!hasStatus && !hasSub && !validUntil && !req.body?.planSlug && !req.body?.name && courtesy === null) {
     return res.status(400).json({ error: "Nada para atualizar" });
   }
   if (req.body?.name) await q("UPDATE companies SET name = $2, updated_at = now() WHERE id = $1", [id, String(req.body.name).trim()]);
+  if (courtesy !== null) {
+    const before = await one<{ courtesy: boolean }>("SELECT courtesy FROM companies WHERE id = $1", [id]);
+    if (before && before.courtesy !== courtesy) {
+      await q("UPDATE companies SET courtesy = $2, updated_at = now() WHERE id = $1", [id, courtesy]);
+      if (courtesy) {
+        await q("UPDATE subscriptions SET status = 'active', updated_at = now() WHERE company_id = $1 AND status <> 'canceled'", [id]);
+        if (!hasStatus) await q("UPDATE companies SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'suspended'", [id]);
+      } else {
+        // Deixou de ser cortesia: passa a ser cobrada a partir de agora (a validade do formulário, se vier, vale por cima).
+        await q("UPDATE subscriptions SET status = 'active', current_period_end = now(), updated_at = now() WHERE company_id = $1 AND status <> 'canceled'", [id]);
+      }
+      await audit(id, (req as Request & { auth: AuthUser }).auth.id, "admin", courtesy ? "Empresa marcada como cortesia" : "Empresa deixou de ser cortesia (cobrança a partir de agora)", ipOf(req));
+    }
+  }
   if (hasStatus) await q("UPDATE companies SET status = $2, updated_at = now() WHERE id = $1", [id, status]);
   if (req.body?.planSlug) {
     const plan = await one<{ id: number }>("SELECT id FROM plans WHERE slug = $1", [String(req.body.planSlug)]);
@@ -532,8 +547,9 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
          count(*) FILTER (WHERE c.status = 'blocked')::int AS blocked,
          count(*) FILTER (WHERE c.status = 'suspended' AND coalesce(s.status, '') <> 'canceled')::int AS suspended,
          count(*) FILTER (WHERE coalesce(s.status, '') = 'canceled')::int AS canceled,
-         count(*) FILTER (WHERE coalesce(s.status, '') = 'trialing' AND s.trial_ends_at < now())::int AS trial_expired,
-         count(*) FILTER (WHERE coalesce(s.status, '') = 'active' AND s.current_period_end IS NOT NULL AND s.current_period_end < now())::int AS period_expired,
+         count(*) FILTER (WHERE NOT c.courtesy AND coalesce(s.status, '') = 'trialing' AND s.trial_ends_at < now())::int AS trial_expired,
+         count(*) FILTER (WHERE NOT c.courtesy AND coalesce(s.status, '') = 'active' AND s.current_period_end IS NOT NULL AND s.current_period_end < now())::int AS period_expired,
+         count(*) FILTER (WHERE c.courtesy)::int AS courtesy,
          (SELECT count(*)::int FROM whatsapp_sessions WHERE status = 'connected') AS whatsapps,
          (SELECT count(*)::int FROM groups) AS groups,
          (SELECT count(*)::int FROM posts WHERE status = 'sent' AND created_at >= date_trunc('day', now())) AS posts_today,
@@ -561,11 +577,11 @@ app.get("/api/admin/console", auth, admin, async (_req, res, next) => {
     const due = await q(
       `SELECT c.id, c.name, s.status, coalesce(s.current_period_end, s.trial_ends_at) AS ends_at
        FROM subscriptions s JOIN companies c ON c.id = s.company_id
-       WHERE c.status <> 'blocked' AND coalesce(s.current_period_end, s.trial_ends_at) BETWEEN now() AND now() + interval '7 days'
+       WHERE c.status <> 'blocked' AND NOT c.courtesy AND coalesce(s.current_period_end, s.trial_ends_at) BETWEEN now() AND now() + interval '7 days'
        ORDER BY 4`
     );
     const companies = await q(
-      `SELECT c.id, c.tenant_id, c.name, c.city, c.state, c.status, c.created_at,
+      `SELECT c.id, c.tenant_id, c.name, c.city, c.state, c.status, c.courtesy, c.created_at,
               u.name AS owner_name, u.email AS owner_email, u.phone AS owner_phone, u.last_login_at,
               p.name AS plan_name, p.slug AS plan_slug, s.status AS sub_status, s.cycle, s.trial_ends_at, s.current_period_end,
               (SELECT count(*)::int FROM whatsapp_sessions w WHERE w.company_id = c.id AND w.status = 'connected') AS whatsapps,
@@ -2208,8 +2224,8 @@ app.get("/api/billing", auth, async (req, res, next) => {
     const companyId = companyIdOf(req);
     const pag = await loadPagbank();
     const provider = pag.active && pag.token ? "pagbank" : (await efiConfigured()) ? "efi" : null;
-    const sub = await one<{ status: string; cycle: string | null; trial_ends_at: string | null; current_period_end: string | null; company_status: string; tax_id: string; plan_name: string; plan_slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
-      `SELECT s.status, s.cycle, s.trial_ends_at, s.current_period_end, c.status AS company_status, c.tax_id, p.name AS plan_name, p.slug AS plan_slug,
+    const sub = await one<{ status: string; cycle: string | null; trial_ends_at: string | null; current_period_end: string | null; company_status: string; courtesy: boolean; tax_id: string; plan_name: string; plan_slug: string; monthly_cents: number; quarterly_cents: number | null; semiannual_cents: number | null; yearly_cents: number }>(
+      `SELECT s.status, s.cycle, s.trial_ends_at, s.current_period_end, c.status AS company_status, c.courtesy, c.tax_id, p.name AS plan_name, p.slug AS plan_slug,
               p.monthly_cents, p.quarterly_cents, p.semiannual_cents, p.yearly_cents
        FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN companies c ON c.id = s.company_id WHERE s.company_id = $1`,
       [companyId]
@@ -2250,7 +2266,7 @@ app.get("/api/billing", auth, async (req, res, next) => {
         // "pix" = copia e cola mostrado aqui; "page" = página do PagBank. O conteúdo só sai no checkout.
         links: Object.fromEntries(Object.entries(plan.pay_links || {}).map(([cycle, link]) => [cycle, isPixCode(String(link)) ? "pix" : isNubankLink(String(link)) ? "nubank" : "page"]))
       })),
-      subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status },
+      subscription: { status: sub.status, cycle: sub.cycle, trialEndsAt: sub.trial_ends_at, currentPeriodEnd: sub.current_period_end, companyStatus: sub.company_status, courtesy: Boolean(sub.courtesy) },
       taxIdHint: digits ? `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}` : "",
       open: open ? invoiceView(open) : null,
       history: history.map(invoiceView)

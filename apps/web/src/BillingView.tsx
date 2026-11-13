@@ -9,7 +9,7 @@ type Billing = {
   awaiting: { id: number; amountCents: number; cycle: string; createdAt: string; link: string } | null;
   plan: { slug: string; name: string; prices: Record<string, number | null> };
   plans: Array<{ slug: string; name: string; maxGroups: number | null; maxConnections: number | null; prices: Record<string, number | null>; links?: Record<string, "pix" | "page" | "nubank"> }>;
-  subscription: { status: string; cycle: string | null; trialEndsAt: string | null; currentPeriodEnd: string | null; companyStatus: string };
+  subscription: { status: string; cycle: string | null; trialEndsAt: string | null; currentPeriodEnd: string | null; companyStatus: string; courtesy?: boolean };
   taxIdHint: string;
   open: Invoice | null;
   history: Invoice[];
@@ -135,7 +135,7 @@ Segue o comprovante:`;
   const sub = data.subscription;
   const ends = sub.status === "trialing" ? sub.trialEndsAt : sub.currentPeriodEnd;
   const late = ends ? new Date(ends).getTime() < Date.now() : false;
-  const statusText = sub.companyStatus === "suspended" ? "Suspensa: pague para voltar a publicar" : sub.status === "trialing" ? (late ? "Teste encerrado" : "Teste grátis") : sub.status === "active" ? (late ? "Vencida" : "Ativa") : "Cancelada";
+  const statusText = sub.courtesy ? "Cortesia" : sub.companyStatus === "suspended" ? "Suspensa: pague para voltar a publicar" : sub.status === "trialing" ? (late ? "Teste encerrado" : "Teste grátis") : sub.status === "active" ? (late ? "Vencida" : "Ativa") : "Cancelada";
   const left = invoice?.expiresAt ? Math.max(0, Math.floor((new Date(invoice.expiresAt).getTime() - now) / 1000)) : 0;
   const expired = invoice?.status === "expired" || (invoice?.status === "pending" && invoice.expiresAt && left === 0);
   // Plano escolhido na hora de pagar: o Pix sai com o preço dele, e a troca só vale quando o pagamento é confirmado.
@@ -157,7 +157,7 @@ Segue o comprovante:`;
       <div className="aff-prefs">
         <div className={`aff-wastate ${sub.companyStatus === "suspended" || late ? "is-off" : sub.status === "active" ? "is-on" : "is-qr"}`}>
           <strong>{data.plan.name} · {statusText}</strong>
-          <span>{sub.status === "trialing" ? "Teste até" : "Válida até"} {day(ends)}{sub.status === "active" ? ` · ${cycleName(sub.cycle)}` : ""}</span>
+          <span>{sub.courtesy ? "Sem cobrança" : <>{sub.status === "trialing" ? "Teste até" : "Válida até"} {day(ends)}{sub.status === "active" ? ` · ${cycleName(sub.cycle)}` : ""}</>}</span>
         </div>
 
         {invoice?.status === "paid" ? (
@@ -167,7 +167,11 @@ Segue o comprovante:`;
           </div>
         ) : null}
 
-        {data.awaiting && invoice?.status !== "paid" ? (
+        {sub.courtesy ? (
+          <p>Esta conta é <b>cortesia</b>: não há cobrança. Se isso mudar, avisamos antes.</p>
+        ) : null}
+
+        {!sub.courtesy && data.awaiting && invoice?.status !== "paid" ? (
           <div className="aff-wastate is-qr">
             <strong>{justOpened ? "📄 A cobrança abriu em outra aba" : "⏳ Aguardando confirmação do pagamento"}</strong>
             <span>{money(data.awaiting.amountCents)} · {cycleName(data.awaiting.cycle)}</span>
@@ -200,7 +204,7 @@ Segue o comprovante:`;
           </article>
         ) : null}
 
-        {manualPix ? null : !data.provider ? (
+        {sub.courtesy || manualPix ? null : !data.provider ? (
           <p className="aff-config-error">O pagamento online ainda não está ativo. Fale com o suporte para renovar.</p>
         ) : invoice && invoice.status === "pending" && !expired ? (
           <article className="aff-pref" style={{ justifyItems: "center", textAlign: "center" }}>

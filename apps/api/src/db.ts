@@ -45,6 +45,8 @@ export const migrate = async () => {
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS benefits TEXT NOT NULL DEFAULT '';
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS pay_links JSONB NOT NULL DEFAULT '{}'::jsonb;
+    -- Cortesia: a empresa não é cobrada (não vence, não é suspensa, sem aviso de cobrança).
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS courtesy BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS quarterly_cents INTEGER;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS semiannual_cents INTEGER;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS max_posts_per_month INTEGER;

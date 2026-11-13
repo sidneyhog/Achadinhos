@@ -537,9 +537,9 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                         <td><button type="button" className="sx-rowbtn" onClick={() => setDetail(company)}><span className="sx-avatar">{initials(company.name)}</span><span><strong>{company.name}</strong><small>{company.city ? `${company.city}/${company.state}` : "cidade não informada"}</small></span></button></td>
                         <td>{company.owner_name || "sem dono"}<small>{company.owner_email || "—"}</small></td>
                         <td>{company.plan_name || "—"}</td>
-                        <td><StatusBadge company={company} /></td>
+                        <td>{company.courtesy ? <Badge tone="info">Cortesia</Badge> : <StatusBadge company={company} />}</td>
                         <td>{money(company.revenue_cents)}</td>
-                        <td>{day(company.current_period_end || company.trial_ends_at)}</td>
+                        <td>{company.courtesy ? "sem cobrança" : day(company.current_period_end || company.trial_ends_at)}</td>
                         <td>{when(company.last_login_at)}</td>
                       </tr>
                     ))}
@@ -975,7 +975,9 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                   planSlug: data.get("plan"),
                   status: data.get("status"),
                   subStatus: data.get("subStatus"),
-                  validUntil: data.get("validUntil")
+                  courtesy: data.get("courtesy") === "on",
+                  // Ao tirar a cortesia sem mexer na validade, a cobrança começa agora (o servidor vence a assinatura).
+                  validUntil: detail.courtesy && data.get("courtesy") !== "on" && data.get("validUntil") === String(detail.current_period_end || detail.trial_ends_at || "").slice(0, 10) ? "" : data.get("validUntil")
                 }) }));
                 if (ok) setDetail(null);
               }}>
@@ -984,6 +986,7 @@ export function Admin({ session, onLogout, onEnter, onRefresh }: { session: Sess
                 <label>Status<select name="status" defaultValue={detail.status === "blocked" || detail.status === "suspended" ? detail.status : "active"}><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></label>
                 <label>Assinatura<select name="subStatus" defaultValue={detail.sub_status || "trialing"}><option value="trialing">Teste</option><option value="active">Paga</option><option value="canceled">Cancelada</option></select></label>
                 <label>Validade<input type="date" name="validUntil" defaultValue={String(detail.current_period_end || detail.trial_ends_at || "").slice(0, 10)} /></label>
+                <label className="sx-check is-wide"><input type="checkbox" name="courtesy" defaultChecked={Boolean(detail.courtesy)} /> Cortesia: não cobrar esta empresa (não vence nem é suspensa). Ao desmarcar, a cobrança começa na hora; para dar prazo, mude a validade junto.</label>
                 <div className="is-wide"><button className="sx-btn is-solid" type="submit">Salvar</button></div>
               </form>
             </div>

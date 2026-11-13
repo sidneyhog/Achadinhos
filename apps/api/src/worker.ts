@@ -220,7 +220,7 @@ const suspendExpired = async () => {
      FROM subscriptions s
      CROSS JOIN platform_settings ps
      WHERE s.company_id = c.id AND ps.id = 1
-       AND c.status = 'active' AND s.status = 'trialing'
+       AND c.status = 'active' AND s.status = 'trialing' AND NOT c.courtesy
        AND s.trial_ends_at IS NOT NULL
        AND s.trial_ends_at + (ps.block_after_days || ' days')::interval < now()
        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.company_id = c.id AND i.status = 'paid')

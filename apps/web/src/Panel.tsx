@@ -1356,19 +1356,18 @@ export function Panel({ session, onLogout, onRefresh, onReturn }: { session: Ses
           {(() => {
             // Aviso de pagamento: vence em até 3 dias, já venceu ou está suspensa. Leva para "Minha assinatura".
             const sub = session.subscription;
-            if (!sub || view === "billing" || session.user.role === "member") return null;
+            if (!sub || sub.courtesy || view === "billing" || session.user.role === "member") return null;
             const ends = sub.status === "trialing" ? sub.trial_ends_at : sub.current_period_end;
             const left = ends ? Math.ceil((new Date(ends).getTime() - Date.now()) / 86400000) : null;
             const suspended = sub.company_status === "suspended";
             if (!suspended && (left == null || left > 3)) return null;
             const text = suspended ? "Sua conta está suspensa e o robô parou." : left! <= 0 ? (sub.status === "trialing" ? "Seu teste grátis terminou." : "Sua assinatura venceu.") : `${sub.status === "trialing" ? "Seu teste grátis" : "Sua assinatura"} vence em ${left} dia${left === 1 ? "" : "s"}.`;
-            return <div className="aff-banner"><strong>{text}</strong> Pague com Pix e a liberação é na hora.<button type="button" onClick={() => setView("billing")}>Pagar agora</button></div>;
+            return <div className="aff-banner"><strong>{text}</strong> Pague com Pix para o robô continuar publicando.<button type="button" onClick={() => setView("billing")}>Pagar agora</button></div>;
           })()}
           {session.user.role === "member" ? <div className="aff-banner">Sua conta é só de leitura. Quem altera a operação é o dono ou um gerente.</div> : null}
           {feed.map((item) => (
             <div key={item.id} className="aff-banner">
               <strong>{item.title}.</strong> {item.body}
-              {item.detail ? <span>{item.detail}</span> : null}
               <button type="button" onClick={() => api(`/api/notices/${item.id}/read`, { method: "POST" }).then(() => setFeed((rows) => rows.filter((row) => row.id !== item.id))).catch(() => undefined)}>Entendi</button>
             </div>
           ))}
