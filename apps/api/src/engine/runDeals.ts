@@ -584,7 +584,11 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       [company.id]
     );
     if (!publishers.length && !bots.length && !statusPubs.length) {
-      await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, "Ative um grupo ou o Status na conexão que deve publicar, ou conecte um bot do Telegram"]);
+      // Grupo ou Status ativo numa conexão que ainda está voltando (ex.: reinício do servidor): não é falta de configuração.
+      const reconnecting = sessions.some(session => (session.status_enabled || groups.some(group => Number(group.whatsapp_id) === session.id)) && !(session.status === "connected" && getLive(session.id)));
+      await q("UPDATE settings SET last_error = $2 WHERE company_id = $1", [company.id, reconnecting
+        ? "WhatsApp reconectando: o robô volta a publicar sozinho em instantes"
+        : "Ative um grupo ou o Status na conexão que deve publicar, ou conecte um bot do Telegram"]);
       return;
     }
 
@@ -645,7 +649,7 @@ const runCompany = async (company: CompanyRow): Promise<number> => {
       // mostrar "Nenhuma oferta passou nos filtros" com cadência longa (ex.: 1 por hora).
       // Se chegou aqui, há onde publicar: o aviso de "Ative um grupo" (ex.: conexão voltando de um reinício) já não vale.
       await q(
-        "UPDATE settings SET last_run_at = now(), last_error = CASE WHEN last_error LIKE 'Ative um grupo%' THEN NULL ELSE last_error END WHERE company_id = $1",
+        "UPDATE settings SET last_run_at = now(), last_error = CASE WHEN last_error LIKE 'Ative um grupo%' OR last_error LIKE 'WhatsApp reconectando%' THEN NULL ELSE last_error END WHERE company_id = $1",
         [company.id]
       );
       return;
